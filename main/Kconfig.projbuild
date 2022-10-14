@@ -1,7 +1,7 @@
 menu "GPIO Change Notifier App"
 
     config GCN_HOST_NAME
-        string "WiFi SSID"
+        string "Host name"
         default "gcn"
         help
             Name to report to the server in the notifications
@@ -24,10 +24,16 @@ menu "GPIO Change Notifier App"
         help
             WiFi password (WPA or WPA2) for the example to use.
 
-    config GCN_NOTIFY_BASE_URL
-        string "WiFi SSID"
+    config GCN_NOTIFY_URL
+        string "Notification URL"
         default "http://myip/mypath"
         help
             URL to target for notifications, hostname will be appended to the path
+
+    config GCN_IDLE_NOTIFICATION_INTERVAL
+        int "Seconds between heartbeat"
+        default 60
+        help
+            Will trigger a forced notification as a heartbeat
         
 endmenu

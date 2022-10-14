@@ -121,7 +121,9 @@ esp_err_t gcn_http_event_handler(esp_http_client_event_t *evt)
             // If user_data buffer is configured, copy the response into the buffer
             if (output_buffer == NULL)
             {
-                output_buffer = (char *)malloc(esp_http_client_get_content_length(evt->client) + 1);
+                int len = esp_http_client_get_content_length(evt->client);
+                ESP_LOGI(TAG, "len %i", len);
+                output_buffer = (char *)malloc(len + 1);
                 output_len = 0;
                 if (output_buffer == NULL)
                 {
@@ -140,12 +142,15 @@ esp_err_t gcn_http_event_handler(esp_http_client_event_t *evt)
         {
             // Response is accumulated in output_buffer. Uncomment the below line to print the accumulated response
             // ESP_LOG_BUFFER_HEX(TAG, output_buffer, output_len);
-            output_buffer[output_len] = '\0';
-            ESP_LOGD(TAG, "content : %s", output_buffer);
-
-            time_t *srv_time = evt->user_data;
-            if (srv_time != NULL)
-                *srv_time = atol(output_buffer);
+            ESP_LOGD(TAG, "output_len %i", output_len);
+            if (output_len > 0)
+            {
+                output_buffer[output_len] = '\0';
+                ESP_LOGD(TAG, "output_buffer : %s", output_buffer);
+                time_t *srv_time = evt->user_data;
+                if (srv_time != NULL)
+                    *srv_time = atol(output_buffer);
+            }
 
             free(output_buffer);
             output_buffer = NULL;
@@ -168,26 +173,29 @@ esp_err_t gcn_http_event_handler(esp_http_client_event_t *evt)
 
 void notify_server(int gpio_value)
 {
-    // build URI
     char buf[512];
-    sprintf(buf, "%s/%s", CONFIG_GCN_NOTIFY_BASE_URL, CONFIG_GCN_HOST_NAME);
 
-    time_t srv_time;
+    time_t now = time(NULL);
+    time_t srv_time = now;
 
     // prepare client request
     esp_http_client_config_t config = {
-        .url = buf,
+        .url = CONFIG_GCN_NOTIFY_URL,
         .method = HTTP_METHOD_POST,
         .transport_type = HTTP_TRANSPORT_OVER_TCP,
         .event_handler = gcn_http_event_handler,
         .user_data = &srv_time,
     };
+
     esp_http_client_handle_t client = esp_http_client_init(&config);
-    assert(client != NULL);
+    if (client == NULL)
+    {
+        ESP_LOGW(TAG, "Could not create HTTP client, skipping notification");
+        goto cleanup;
+    }
 
     // build post data
-    time_t now = time(NULL);
-    sprintf(buf, "time=%lu&gpio=%i&value=%i", now, CONFIG_GCN_WATCH_GPIO_NUMBER, gpio_value);
+    sprintf(buf, "host=%s&time=%lu&gpio=%i&value=%i", CONFIG_GCN_HOST_NAME, now, CONFIG_GCN_WATCH_GPIO_NUMBER, gpio_value);
     esp_http_client_set_post_field(client, buf, strlen(buf));
     ESP_LOGD(TAG, "query parameters : %s", buf);
 
@@ -195,10 +203,11 @@ void notify_server(int gpio_value)
     esp_err_t err = esp_http_client_perform(client);
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "HTTP POST request failed: %s", esp_err_to_name(err));
-        return;
+        ESP_LOGW(TAG, "HTTP POST request failed: %s", esp_err_to_name(err));
+        goto cleanup;
     }
-    ESP_LOGI(TAG, "HTTP POST Status = %d, content_length = %d", esp_http_client_get_status_code(client), esp_http_client_get_content_length(client));
+
+    ESP_LOGD(TAG, "Notification result : Status = %d", esp_http_client_get_status_code(client));
 
     // sync time
     if (abs(srv_time - now) > 60)
@@ -211,6 +220,10 @@ void notify_server(int gpio_value)
         if (settimeofday(&tv, NULL) != 0)
             ESP_LOGW(TAG, "Could not update local clock");
     }
+
+cleanup:
+    if (client != NULL)
+        esp_http_client_cleanup(client);
 }
 
 void app_main()
@@ -234,13 +247,27 @@ void app_main()
     gpio_config(&io_conf);
 
     bool last_state = gpio_get_level(CONFIG_GCN_WATCH_GPIO_NUMBER);
+    time_t last_notification = time(NULL);
+
     while (true)
     {
         // idle
         vTaskDelay(WAIT_LOOP_MS / portTICK_RATE_MS);
 
-        // detect change
+        // read state
+        time_t now = time(NULL);
         bool new_state = gpio_get_level(CONFIG_GCN_WATCH_GPIO_NUMBER);
+
+        // heartbeat
+        if (connected && now - last_notification > CONFIG_GCN_IDLE_NOTIFICATION_INTERVAL)
+        {
+            ESP_LOGI(TAG, "Forcing notification as heartbeat");
+            notify_server(new_state);
+            last_notification = now;
+            continue;
+        }
+
+        // detect change
         if (new_state == last_state)
             continue;
 
@@ -251,8 +278,6 @@ void app_main()
         new_state = gpio_get_level(CONFIG_GCN_WATCH_GPIO_NUMBER);
         if (new_state == last_state)
             continue;
-
-        // TODO: if not connected, put it in the back-log
 
         // input changed for good, so notify
         last_state = new_state;
