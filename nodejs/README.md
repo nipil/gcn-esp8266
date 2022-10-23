@@ -6,7 +6,7 @@ This is a crude GCN to IFTTT webhook wrapper
 
 From Debian strech (installs 8.11.1 if using backports) and up :
 
-    sudo apt-get instal nodejs
+    sudo apt-get install nodejs git
     sudo adduser gcn
     sudo -i -u gcn git clone https://github.com/nipil/gcn-esp8266
     sudo cp ~gcn/gcn-esp8266/nodejs/gcn.service /lib/systemd/system/gcn.service
