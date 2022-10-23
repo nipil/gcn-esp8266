@@ -7,7 +7,7 @@ After=network.target
 Environment=NODE_PORT=8090
 Type=simple
 User=gcn
-ExecStart=/usr/bin/node /home/gcn/gcn-esp8266/nodejs/srv.js
+ExecStart=/usr/bin/node /home/gcn/gcn-esp8266/nodejs/gcn.js
 Restart=on-failure
 
 [Install]
