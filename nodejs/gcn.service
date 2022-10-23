@@ -1,0 +1,14 @@
+[Unit]
+Description=gcn-esp notification handler
+Documentation=https://github.com/nipil/gcn-esp8266
+After=network.target
+
+[Service]
+Environment=NODE_PORT=8090
+Type=simple
+User=gcn
+ExecStart=/usr/bin/node /home/gcn/gcn-esp8266/nodejs/srv.js
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
