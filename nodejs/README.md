@@ -6,19 +6,29 @@ This is a crude GCN to IFTTT webhook wrapper
 
 From Debian strech (installs 8.11.1 if using backports) and up :
 
-- sudo apt-get instal nodejs
-- sudo adduser gcn
-- sudo -i -u gcn git clone https://github.com/nipil/gcn-esp8266
-- sudo cp ~gcn/gcn-esp8266/nodejs/gcn.service /lib/systemd/system/gcn.service
-- sudo systemctl daemon-reload
-- sudo systemctl enable gcn.service
-- sudo -u gcn vim ~gcn/gcn-esp8266/nodejs/gcn.js
+    sudo apt-get instal nodejs
+    sudo adduser gcn
+    sudo -i -u gcn git clone https://github.com/nipil/gcn-esp8266
+    sudo cp ~gcn/gcn-esp8266/nodejs/gcn.service /lib/systemd/system/gcn.service
+    sudo systemctl daemon-reload
+    sudo systemctl enable gcn.service
+    sudo -u gcn vim ~gcn/gcn-esp8266/nodejs/gcn.js
 
 Change the following to fit your IFTTT account key (xxxx) and webhook name (yyy):
 
-const IFTTT_ACCOUNT_KEY = "xxxxxxxxxxxxxxxxxxxxxxxx";
-const IFTTT_WEBHOOK_TRIGGER = "yyy";
+    const IFTTT_ACCOUNT_KEY = "xxxxxxxxxxxxxxxxxxxxxxxx";
+    const IFTTT_WEBHOOK_TRIGGER = "yyy";
 
-Finally:
+## use
 
-- sudo systemctl start gcn.service
+Start for the first time :
+
+    sudo systemctl start gcn.service
+
+Check :
+
+    sudo systemctl status gcn
+
+Trace :
+
+    sudo journalctl -u gcn -f
