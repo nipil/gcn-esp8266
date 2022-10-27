@@ -9,7 +9,7 @@ const querystring = require('querystring');
 const fs = require('fs');
 
 // copy credentials.js.example to credentials.js and update it
-const credentials_file = './credentials.js';
+const credentials_file = __dirname + '/credentials.js';
 fs.chmodSync(credentials_file, 0o600);
 
 // your data: IFTTT_ACCOUNT_KEY, IFTTT_WEBHOOK_TRIGGER
