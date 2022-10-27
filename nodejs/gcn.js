@@ -12,7 +12,7 @@ const IFTTT_ACCOUNT_KEY = "xxxxxxxxxxxxxxxxx";
 const IFTTT_WEBHOOK_TRIGGER = "yyyyy";
 
 // customizable
-const INACTIVE_THRESHOLD_SEC = 120;
+const INACTIVE_THRESHOLD_SEC = 3 * 60;
 const WEBSERVER_HTTP_PORT = 8090
 const WEBSERVER_LISTEN_ADDR = '::'
 
@@ -115,6 +115,8 @@ function web_handler(request, response) {
                 return;
             }
 
+            // console.debug('Received', sample);
+
             // fetch last known
             var host_data = cache[sample.host];
             if (host_data === undefined || host_data === null) {
@@ -128,7 +130,7 @@ function web_handler(request, response) {
             // none found
             var gpio_data = host_data[sample.gpio];
             if (gpio_data === undefined || gpio_data === null) {
-                console.info(`Host ${sample.host} gpio ${sample.gpio} : detected`);
+                console.info(`Host ${sample.host} gpio ${sample.gpio} : detected with time ${sample.time}`);
                 gpio_data = {
                     "time": server_time,
                     "value": sample.value,
@@ -138,7 +140,7 @@ function web_handler(request, response) {
             }
 
             // check when coming back
-            if (gpio_data.time + INACTIVE_THRESHOLD_SEC < server_time) {
+            if (gpio_data.value === undefined) {
                 console.info(`Host ${sample.host} gpio ${sample.gpio} : speaks again`);
                 ifttt_webhook(sample.host, sample.gpio, "SPEAKING");
             }
