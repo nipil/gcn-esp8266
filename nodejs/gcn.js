@@ -6,10 +6,14 @@
 const http = require('http');
 const https = require('https');
 const querystring = require('querystring');
+const fs = require('fs');
 
-// your data
-const IFTTT_ACCOUNT_KEY = "xxxxxxxxxxxxxxxxx";
-const IFTTT_WEBHOOK_TRIGGER = "yyyyy";
+// copy credentials.js.example to credentials.js and update it
+const credentials_file = './credentials.js';
+fs.chmodSync(credentials_file, 0o600);
+
+// your data: IFTTT_ACCOUNT_KEY, IFTTT_WEBHOOK_TRIGGER
+const credentials = require(credentials_file);
 
 // customizable
 const INACTIVE_THRESHOLD_SEC = 3 * 60;
@@ -41,7 +45,7 @@ function ifttt_webhook(value1 = null, value2 = null, value3 = null) {
 
     const options = {
         hostname: 'maker.ifttt.com',
-        path: `/trigger/${IFTTT_WEBHOOK_TRIGGER}/with/key/${IFTTT_ACCOUNT_KEY}`,
+        path: `/trigger/${credentials.IFTTT_WEBHOOK_TRIGGER}/with/key/${credentials.IFTTT_ACCOUNT_KEY}`,
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
