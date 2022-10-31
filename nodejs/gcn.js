@@ -168,6 +168,7 @@ function web_handler(request, response) {
             }
 
             // update latest entry
+            stored.time = current.time;
             host_data[current.gpio] = stored;
 
             // provide server unix timestamp to the client
