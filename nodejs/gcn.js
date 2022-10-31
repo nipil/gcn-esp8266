@@ -69,15 +69,15 @@ function check_inactive() {
     for (const host in cache) {
         var host_data = cache[host];
         for (const gpio in host_data) {
-            var gpio_data = host_data[gpio];
+            var stored = host_data[gpio];
             // skip if already notified
-            if (gpio_data.value === undefined) {
+            if (stored.value === undefined) {
                 continue;
             }
             // notify if not seen for a while
-            if (gpio_data.time + INACTIVE_THRESHOLD_SEC < server_time) {
+            if (stored.time + INACTIVE_THRESHOLD_SEC < server_time) {
                 console.warn(`host ${host} gpio ${gpio} : went silent`);
-                gpio_data.value = undefined;
+                stored.value = undefined;
                 ifttt_webhook(host, gpio, "SILENT");
             }
         }
@@ -108,58 +108,67 @@ function web_handler(request, response) {
                 return;
             }
 
-            var sample = {
+            var current = {
+                "ip": request.socket.remoteAddress,
                 "host": params.host.trim(),
                 "gpio": Number(params.gpio),
                 "time": Number(params.time),
                 "value": Number(params.value),
             };
-            if (sample.time == NaN || sample.gpio == NaN || sample.value == NaN) {
+            if (current.time == NaN || current.gpio == NaN || current.value == NaN) {
                 reply(response, 400, ```Invalid body {body}```);
                 return;
             }
 
-            // console.debug('Received', sample);
+            // console.debug('Received', current);
 
             // fetch last known
-            var host_data = cache[sample.host];
+            var host_data = cache[current.host];
             if (host_data === undefined || host_data === null) {
                 host_data = {};
-                cache[sample.host] = host_data;
+                cache[current.host] = host_data;
             }
 
             // server time
             var server_time = Math.floor(Date.now() / 1000);
 
             // none found
-            var gpio_data = host_data[sample.gpio];
-            if (gpio_data === undefined || gpio_data === null) {
-                console.info(`Host ${sample.host} gpio ${sample.gpio} : detected with time ${sample.time}`);
-                gpio_data = {
+            var stored = host_data[current.gpio];
+            if (stored === undefined || stored === null) {
+                stored = {
                     "time": server_time,
-                    "value": sample.value,
+                    "value": current.value,
+                    "ip": current.ip,
                 };
-                host_data[sample.gpio] = gpio_data;
-                ifttt_webhook(sample.host, sample.gpio, "DETECTED");
+                host_data[current.gpio] = stored;
+                console.info(`Host ${current.host} gpio ${current.gpio} : detected from ${current.ip} with time ${current.time}`);
+                ifttt_webhook(current.host, current.gpio, `DETECTED ${current.ip}`);
+            }
+
+
+            // check for ip change
+            if (stored.ip !== current.ip) {
+                console.info(`Host ${current.host} gpio ${current.gpio} : changed ip ${current.ip}`);
+                ifttt_webhook(current.host, current.gpio, `NEWIP ${current.ip}`);
+                stored.ip = current.ip;
             }
 
             // check when coming back
-            if (gpio_data.value === undefined) {
-                console.info(`Host ${sample.host} gpio ${sample.gpio} : speaks again`);
-                ifttt_webhook(sample.host, sample.gpio, "SPEAKING");
+            if (stored.value === undefined) {
+                console.info(`Host ${current.host} gpio ${current.gpio} : speaks again`);
+                ifttt_webhook(current.host, current.gpio, "SPEAKING");
+                stored.value = current.value;
             }
 
             // check if there was a value change
-            if (gpio_data.value !== undefined && gpio_data.value !== sample.value) {
-                console.info(`Host ${sample.host} gpio ${sample.gpio} : value changed ${gpio.value} => ${sample.value}`);
-                ifttt_webhook(sample.host, sample.gpio, sample.value ? "STOP" : "START");
+            if (stored.value !== current.value) {
+                console.info(`Host ${current.host} gpio ${current.gpio} : value changed ${stored.value} => ${current.value}`);
+                ifttt_webhook(current.host, current.gpio, current.value ? "STOP" : "START");
+                stored.value = current.value;
             }
 
             // update latest entry
-            host_data[sample.gpio] = {
-                "time": server_time,
-                "value": sample.value,
-            };
+            host_data[current.gpio] = stored;
 
             // provide server unix timestamp to the client
             reply(response, 200, server_time.toString());
