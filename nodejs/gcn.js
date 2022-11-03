@@ -16,7 +16,9 @@ fs.chmodSync(credentials_file, 0o600);
 const credentials = require(credentials_file);
 
 // customizable
-const INACTIVE_THRESHOLD_SEC = 3 * 60;
+const MESSAGE_INTERVAL_SEC = 60;
+const INACTIVE_THRESHOLD_SEC = 3 * MESSAGE_INTERVAL_SEC;
+const TRACE_THRESHOLD_SEC = 2 * MESSAGE_INTERVAL_SEC;
 const WEBSERVER_HTTP_PORT = 8090
 const WEBSERVER_LISTEN_ADDR = '::'
 
@@ -141,10 +143,15 @@ function web_handler(request, response) {
                     "ip": current.ip,
                 };
                 host_data[current.gpio] = stored;
-                console.info(`Host ${current.host} gpio ${current.gpio} : detected from ${current.ip} with time ${current.time}`);
+                console.info(`Host ${current.host} gpio ${current.gpio} : detected from ${current.ip} with client time ${current.time} offset ${Math.abs(server_time - current.time)} from server ${server_time}`);
                 ifttt_webhook(current.host, current.gpio, `DETECTED ${current.ip}`);
             }
 
+            // log longer intervals
+            const time_silence = server_time - stored.time;
+            if (stored.time + TRACE_THRESHOLD_SEC < server_time) {
+                console.warn(`Host ${current.host} gpio ${current.gpio} : late message after ${time_silence} seconds`);
+            }
 
             // check for ip change
             if (stored.ip !== current.ip) {
@@ -155,8 +162,8 @@ function web_handler(request, response) {
 
             // check when coming back
             if (stored.value === undefined) {
-                console.info(`Host ${current.host} gpio ${current.gpio} : speaks again`);
-                ifttt_webhook(current.host, current.gpio, "SPEAKING");
+                console.info(`Host ${current.host} gpio ${current.gpio} : speaks again after ${time_silence} seconds`);
+                ifttt_webhook(current.host, current.gpio, `SPEAKING after ${time_silence} sec`);
                 stored.value = current.value;
             }
 
@@ -168,7 +175,7 @@ function web_handler(request, response) {
             }
 
             // update latest entry
-            stored.time = current.time;
+            stored.time = server_time;
             host_data[current.gpio] = stored;
 
             // provide server unix timestamp to the client
@@ -183,4 +190,10 @@ server.listen(WEBSERVER_HTTP_PORT, WEBSERVER_LISTEN_ADDR);
 console.log(`gcn starts, listening for http on address ${WEBSERVER_LISTEN_ADDR} and port ${WEBSERVER_HTTP_PORT}`);
 
 // schedule first inactive check (fives a chance to everyone to say hello)
-setTimeout(check_inactive, INACTIVE_THRESHOLD_SEC * 1000);
+const timeoutObj = setTimeout(check_inactive, INACTIVE_THRESHOLD_SEC * 1000);
+
+process.on('SIGTERM', function () {
+    console.log("gcn stops gracefully");
+    clearTimeout(timeoutObj);
+    process.exit();
+});
