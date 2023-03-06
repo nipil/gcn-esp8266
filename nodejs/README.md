@@ -6,13 +6,14 @@ This is a crude GCN to IFTTT webhook wrapper
 
 From Debian strech (installs 8.11.1 if using backports) and up :
 
-    sudo apt-get install nodejs git
+    sudo apt-get install -y nodejs git
     sudo adduser gcn
     sudo -i -u gcn git clone https://github.com/nipil/gcn-esp8266
     sudo cp ~gcn/gcn-esp8266/nodejs/gcn.service /etc/systemd/system/gcn.service
     sudo systemctl daemon-reload
     sudo systemctl enable gcn.service
-    sudo -u gcn vim ~gcn/gcn-esp8266/nodejs/gcn.js
+    sudo -u gcn cp -v ~gcn/gcn-esp8266/nodejs/credentials.js{.example,}
+    sudo -u gcn vim ~gcn/gcn-esp8266/nodejs/credentials.js
 
 Change the following to fit your IFTTT account key (xxxx) and webhook name (yyy):
 
@@ -31,4 +32,4 @@ Check :
 
 Trace :
 
-    sudo journalctl -u gcn -f
+    c
