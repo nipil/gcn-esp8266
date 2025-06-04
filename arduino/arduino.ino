@@ -14,13 +14,23 @@
 #define GCN_ERROR_WAITING_BEFORE_REBOOT_MS (10 * 1000)
 #define GCN_LIGHT_SHORT_DURATION_MS 100
 #define GCN_LIGHT_LONG_DURATION_MS 1000
+#define GCN_MQTT_STATUS_INTERVAL_MS (60 * 1000)
+#define GCN_WIFI_STATUS_INTERVAL_MS (60 * 1000)
 
 // Optional behaviours
+#define GCN_DEBUG_LOOP_TIMING
 // #define GCN_DEBUG_ARDUINO_OUTPUT_PIN
 // #define GCN_DEBUG_LIGHT_STATE_MACHINE
 // #define GCN_DEBUG_MAIN_STATE_MACHINE
+// #define GCN_DEBUG_WIFI_STATUS
 // #define GCN_DEBUG_MQTT_PUBLISH
+// #define GCN_DEBUG_MQTT_SUBSCRIBE
 #define GCN_PERIODIC_REBOOT_AFTER_MS (24 * 60 * 60 * 1000)
+
+// Optional parameters
+#ifdef GCN_DEBUG_LOOP_TIMING
+#define GCN_SLOW_LOOP_WARN_MS 1000
+#endif  // GCN_DEBUG_LOOP_TIMING
 
 // MQTT
 // https://test.mosquitto.org for the various available setups
@@ -255,7 +265,9 @@ private:
   int wifi_credentials_index;
   unsigned long error_detected_millis;
   unsigned long wifi_connecting_start_millis;
+  unsigned long wifi_last_status_display;
   unsigned long mqtt_connecting_start_millis;
+  unsigned long mqtt_last_status_display;
   int last_wifi_status;
 
   void run_enters() {
@@ -404,13 +416,17 @@ private:
     WiFi.begin(credential->ssid, credential->password);
 
     last_wifi_status = WiFi.status();
+#ifdef GCN_DEBUG_WIFI_STATUS
     Serial.print("Initial wifi status ");
     Serial.println(last_wifi_status);
+#endif  // GCN_DEBUG_WIFI_STATUS
   }
 
   void state_wifi_try_config_task() {
     if (is_wifi_connected()) {
-      Serial.println("is_wifi_connected");
+      Serial.print("Wifi connection established in ");
+      Serial.print(millis() - wifi_connecting_start_millis);
+      Serial.println(" ms");
       set_state(MAIN_STATE_WIFI_CONNECTED);
       return;
     }
@@ -428,19 +444,17 @@ private:
   }
 
   void state_wifi_connected_enter() {
-    Serial.print("Wifi connected after ");
-    Serial.print(millis() - wifi_connecting_start_millis);
-    Serial.println(" ms");
-    Serial.print("Local IP address is ");
-    Serial.println(WiFi.localIP());
+    if (millis() - wifi_last_status_display > GCN_WIFI_STATUS_INTERVAL_MS) {
+      wifi_last_status_display = millis();
+      Serial.print("Wifi connection active for ");
+      Serial.print((millis() - wifi_connecting_start_millis)) / 1000UL;
+      Serial.print(" secs, local IP address is ");
+      Serial.println(WiFi.localIP());
+    }
 
     mqtt_connecting_start_millis = millis();
 
-    if (is_mqtt_connected()) {
-      Serial.println("MQTT client already connected... WEIRD !");
-      set_state(MAIN_STATE_MQTT_CONNECTED);
-    }
-
+    mqtt_client.disconnect();
     Serial.print("MQTT server ");
     Serial.print(GCN_MQTT_BROKER_DNS_NAME);
     Serial.print(" port ");
@@ -453,7 +467,8 @@ private:
   }
 
   void state_wifi_connected_task() {
-    if (millis() - mqtt_connecting_start_millis > GCN_MQTT_WAITING_TIMEOUT_MS) {
+    unsigned long elapsed = millis() - mqtt_connecting_start_millis;
+    if (elapsed > GCN_MQTT_WAITING_TIMEOUT_MS) {
       Serial.print("Exhausted available wait time to connect to MQTT, aborting");
       set_state(MAIN_STATE_ERROR);
       return;
@@ -464,7 +479,7 @@ private:
     std::replace(mac.begin(), mac.end(), ':', '_');
     String mqtt_client_id = String(GCN_MQTT_BROKER_APP_TOPIC) + String("-") + mac;
 
-    Serial.print("MQTTclient-id ");
+    Serial.print("MQTT connect client-id ");
     Serial.print(mqtt_client_id.c_str());
     Serial.print("MQTT will topic ");
     Serial.print(will_topic.c_str());
@@ -481,11 +496,14 @@ private:
       will_topic.c_str(), GCN_MQTT_BROKER_WILL_QOS, GCN_MQTT_BROKER_WILL_RETAIN, GCN_MQTT_BROKER_WILL_MESSAGE,
       GCN_MQTT_BROKER_CLEAN_SESSION);
 
+    Serial.print("MQTT connect ");
+    Serial.print(success ? "OK" : "FAIL");
+    Serial.print(" after ");
+    Serial.print(elapsed);
+    Serial.print(" ms, state=");
+    Serial.println(mqtt_client.state());  // http://pubsubclient.knolleary.net/api#state
+
     if (!success) {
-      Serial.print("MQTT connect failed at ");
-      Serial.print(millis());
-      Serial.print(" ms, state=");
-      Serial.println(mqtt_client.state());  // http://pubsubclient.knolleary.net/api#state
       return;
     }
 
@@ -498,16 +516,23 @@ private:
 
   void state_mqtt_connected_enter() {
     light_state_machine.permanent();
-    Serial.print("MQTT connected after ");
+    Serial.print("MQTT connection established in ");
     Serial.print(millis() - mqtt_connecting_start_millis);
     Serial.println(" ms");
+
+    mqtt_last_status_display = millis();
+
     // TODO: subscribe to gcn/%u/in/command
   }
 
   void state_mqtt_connected_task() {
-    Serial.print("mqtt connected seconds ");
-    Serial.println((unsigned long)millis() / 1000L);
-    delay(10000);
+    if (millis() - mqtt_last_status_display > GCN_MQTT_STATUS_INTERVAL_MS) {
+      mqtt_last_status_display = millis();
+      Serial.print("MQTT connection active for ");
+      Serial.print((millis() - mqtt_connecting_start_millis) / 1000UL);
+      Serial.println(" secs");
+    }
+
     // TODO: read initial input states
     // TODO: read current input stats
     // TODO: compute changes
@@ -529,21 +554,40 @@ private:
     wl_status_t status = WiFi.status();
     if (status != last_wifi_status) {
       last_wifi_status = status;
+#ifdef GCN_DEBUG_WIFI_STATUS
       Serial.print("Wifi status changed to ");
       Serial.println(status);
+#endif  // GCN_DEBUG_WIFI_STATUS
     }
     return status == WL_CONNECTED;
   }
 
   bool is_mqtt_connected() const {
-    return mqtt_client.connected();
+    static bool s_connected = false;
+    static int s_state = -1;
+    bool connected = mqtt_client.connected();
+    int state = mqtt_client.state();
+    if (s_connected != connected || s_state != state) {
+      s_connected = connected;
+      s_state = state;
+      Serial.print("MQTT client change detected : connected ");
+      Serial.print(connected ? "YES" : "NO");
+      Serial.print(" state ");
+      Serial.print(state);
+      Serial.print(" at ");
+      Serial.println(millis());
+      Serial.println(" ms");
+    }
+    return connected;
   }
 
   bool publish(const String &topic, const String &message, bool retain) {
     bool result = mqtt_client.publish(topic.c_str(), message.c_str(), retain);
 #ifdef GCN_DEBUG_MQTT_PUBLISH
     Serial.print("MQTT publish ");
-    Serial.print(result);
+    Serial.print(result ? "OK" : "FAIL");
+    Serial.print(" retain ");
+    Serial.print(retain ? "YES" : "NO");
     Serial.print(" topic ");
     Serial.print(topic.c_str());
     Serial.print(" message ");
@@ -600,5 +644,23 @@ void setup() {
 
 void loop() {
   delay(10);
+#ifdef GCN_DEBUG_LOOP_TIMING
+  static unsigned long max_loop_millis = 0;
+  unsigned long start_loop_millis = millis();
+#endif  // GCN_DEBUG_LOOP_TIMING
   main_state_machine.update();
+#ifdef GCN_DEBUG_LOOP_TIMING
+  unsigned long loop_millis = millis() - start_loop_millis;
+  if (loop_millis > GCN_SLOW_LOOP_WARN_MS) {
+    Serial.print("Slow loop ");
+    Serial.print(loop_millis);
+    Serial.println(" ms");
+  }
+  if (loop_millis > max_loop_millis) {
+    max_loop_millis = loop_millis;
+    Serial.print("Max loop duration reached ");
+    Serial.print(loop_millis);
+    Serial.println(" ms");
+  }
+#endif  // GCN_DEBUG_LOOP_TIMING
 }
