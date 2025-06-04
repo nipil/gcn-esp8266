@@ -2,37 +2,40 @@
 #include <PubSubClient.h>
 
 // ESP8266 default baud rate on boot
-#define SERIAL_BAUD 74880
+#define GCN_SERIAL_BAUD 74880
 
 // Change according to your output led
-#define STATUS_LED_PIN LED_BUILTIN
-#define STATUS_LED_INVERT true
+#define GCN_STATUS_LED_PIN LED_BUILTIN
+#define GCN_STATUS_LED_INVERT true
 
 // General behaviour
-#define PERIODIC_REBOOT_AFTER_MS (24 * 60 * 60 * 1000)
-#define WIFI_WAITING_TIMEOUT_MS (10 * 1000)
-#define MQTT_WAITING_TIMEOUT_MS (10 * 1000)
-#define ERROR_WAITING_BEFORE_REBOOT_MS (10 * 1000)
-#define LIGHT_SHORT_DURATION_MS 100
-#define LIGHT_LONG_DURATION_MS 1000
+#define GCN_WIFI_WAITING_TIMEOUT_MS (10 * 1000)
+#define GCN_MQTT_WAITING_TIMEOUT_MS (10 * 1000)
+#define GCN_ERROR_WAITING_BEFORE_REBOOT_MS (10 * 1000)
+#define GCN_LIGHT_SHORT_DURATION_MS 100
+#define GCN_LIGHT_LONG_DURATION_MS 1000
+
+// Optional behaviours
+// #define GCN_DEBUG_ARDUINO_OUTPUT_PIN
+// #define GCN_DEBUG_LIGHT_STATE_MACHINE
+// #define GCN_DEBUG_MAIN_STATE_MACHINE
+// #define GCN_DEBUG_MQTT_PUBLISH
+#define GCN_PERIODIC_REBOOT_AFTER_MS (24 * 60 * 60 * 1000)
 
 // MQTT
 // https://test.mosquitto.org for the various available setups
-#define MQTT_BROKER_DNS_NAME "test.mosquitto.org"
-#define MQTT_BROKER_TCP_PORT 1883
-#define MQTT_BROKER_USERNAME NULL
-#define MQTT_BROKER_PASSWORD NULL
-#define MQTT_BROKER_APP_TOPIC "gcn"
-#define MQTT_BROKER_WILL_SUBTOPIC "status"
-#define MQTT_BROKER_WILL_QOS 1
-#define MQTT_BROKER_WILL_RETAIN true
-#define MQTT_BROKER_WILL_MESSAGE "offline"
-#define MQTT_BROKER_CLEAN_SESSION true
+#define GCN_MQTT_BROKER_DNS_NAME "test.mosquitto.org"
+#define GCN_MQTT_BROKER_TCP_PORT 1883
+#define GCN_MQTT_BROKER_USER_NAME NULL
+#define GCN_MQTT_BROKER_PASSWORD NULL
+#define GCN_MQTT_BROKER_APP_TOPIC "gcn"
+#define GCN_MQTT_BROKER_WILL_SUBTOPIC "out/status"
+#define GCN_MQTT_BROKER_WILL_QOS 0
+#define GCN_MQTT_BROKER_WILL_RETAIN true
+#define GCN_MQTT_BROKER_WILL_MESSAGE "offline"
+#define GCN_MQTT_BROKER_BORN_MESSAGE "online"
+#define GCN_MQTT_BROKER_CLEAN_SESSION true
 
-// Serial debugging
-// #define DEBUG_ARDUINO_OUTPUT_PIN
-// #define DEBUG_LIGHT_STATE_MACHINE
-// #define DEBUG_MAIN_STATE_MACHINE
 
 typedef struct
 {
@@ -40,8 +43,14 @@ typedef struct
   const char *const password;
 } WifiCredential;
 
+// Update with your Wifi credential pairs (can use more than one pair, one for each SSID)
 const WifiCredential wifi_credentials[] = {
   { "your_ssid", "your_password" },
+};
+
+// The pins you want to monitor
+const int monitor_digital_pins[] = {
+  D1,
 };
 
 void (*resetFunc)(void) = 0;
@@ -66,13 +75,13 @@ public:
   }
 
   void on() {
-#ifdef DEBUG_ARDUINO_OUTPUT_PIN
+#ifdef GCN_DEBUG_ARDUINO_OUTPUT_PIN
     Serial.print("Turning on ");
     if (invert) {
       Serial.print("inverted ");
     }
     Serial.println(pin_number);
-#endif  // DEBUG_ARDUINO_OUTPUT_PIN
+#endif  // GCN_DEBUG_ARDUINO_OUTPUT_PIN
 
     if (invert) {
       digitalWrite(pin_number, LOW);
@@ -82,13 +91,13 @@ public:
   }
 
   void off() {
-#ifdef DEBUG_ARDUINO_OUTPUT_PIN
+#ifdef GCN_DEBUG_ARDUINO_OUTPUT_PIN
     Serial.print("Turning off ");
     if (invert) {
       Serial.print("inverted ");
     }
     Serial.println(pin_number);
-#endif  // DEBUG_ARDUINO_OUTPUT_PIN
+#endif  // GCN_DEBUG_ARDUINO_OUTPUT_PIN
 
     if (invert) {
       digitalWrite(pin_number, HIGH);
@@ -238,6 +247,7 @@ private:
   } MainState;
 
   const int WIFI_CREDENTIALS_COUNT = sizeof(wifi_credentials) / sizeof(WifiCredential);
+  const int MONITOR_DIGITAL_PIN_COUNT = sizeof(monitor_digital_pins) / sizeof(int);
 
   PubSubClient &mqtt_client;
   LightStateMachine &light_state_machine;
@@ -307,10 +317,10 @@ private:
   }
 
   void set_state(const MainState new_state) {
-#ifdef DEBUG_MAIN_STATE_MACHINE
+#ifdef GCN_DEBUG_MAIN_STATE_MACHINE
     Serial.print("Switching main_state to ");
     Serial.println(new_state);
-#endif  // DEBUG_MAIN_STATE_MACHINE
+#endif  // GCN_DEBUG_MAIN_STATE_MACHINE
     main_state = new_state;
     run_enters();
   }
@@ -319,20 +329,17 @@ private:
     error_detected_millis = millis();
     light_state_machine.start(1);
     Serial.print("Unrecoverable error state reached, rebooting in ");
-    Serial.print(ERROR_WAITING_BEFORE_REBOOT_MS);
+    Serial.print(GCN_ERROR_WAITING_BEFORE_REBOOT_MS);
     Serial.println(" ms");
   }
 
   void state_error_task() {
-    if (millis() - error_detected_millis > ERROR_WAITING_BEFORE_REBOOT_MS) {
+    if (millis() - error_detected_millis > GCN_ERROR_WAITING_BEFORE_REBOOT_MS) {
       reboot();
     }
   }
 
   void state_reboot_enter() {
-    Serial.print("Maximum running time reached ");
-    Serial.print(PERIODIC_REBOOT_AFTER_MS);
-    Serial.println(" ms");
   }
 
   void state_reboot_task() {
@@ -345,9 +352,19 @@ private:
   }
 
   void state_boot_task() {
-    Serial.begin(SERIAL_BAUD);
+    Serial.begin(GCN_SERIAL_BAUD);
     Serial.print("MQTT client MAC address is ");
     Serial.println(WiFi.macAddress());
+    if (MONITOR_DIGITAL_PIN_COUNT > 0) {
+      Serial.print("Monitored digital pins");
+      for (int i = 0; i < MONITOR_DIGITAL_PIN_COUNT; i++) {
+        Serial.print(" ");
+        Serial.print(monitor_digital_pins[i]);
+      }
+      Serial.println();
+    } else {
+      Serial.println("No digital pins monitored");
+    }
     light_state_machine.setup();
     WiFi.mode(WIFI_STA);
     set_state(MAIN_STATE_WIFI_NOT_CONNECTED);
@@ -398,12 +415,12 @@ private:
       return;
     }
 
-    if (millis() - wifi_connecting_start_millis < WIFI_WAITING_TIMEOUT_MS) {
+    if (millis() - wifi_connecting_start_millis < GCN_WIFI_WAITING_TIMEOUT_MS) {
       return;  // wait more
     }
 
     Serial.print("Failed to connect to Wifi after ");
-    Serial.print(WIFI_WAITING_TIMEOUT_MS);
+    Serial.print(GCN_WIFI_WAITING_TIMEOUT_MS);
     Serial.println(" ms");
 
     wifi_credentials_index++;
@@ -424,54 +441,59 @@ private:
       set_state(MAIN_STATE_MQTT_CONNECTED);
     }
 
-    Serial.print("Will connect to MQTT server ");
-    Serial.print(MQTT_BROKER_DNS_NAME);
+    Serial.print("MQTT server ");
+    Serial.print(GCN_MQTT_BROKER_DNS_NAME);
     Serial.print(" port ");
-    Serial.println(MQTT_BROKER_TCP_PORT);
-    mqtt_client.setServer(MQTT_BROKER_DNS_NAME, MQTT_BROKER_TCP_PORT);
+    Serial.println(GCN_MQTT_BROKER_TCP_PORT);
+    mqtt_client.setServer(GCN_MQTT_BROKER_DNS_NAME, GCN_MQTT_BROKER_TCP_PORT);
 
+    // TODO: subscribe and debug define
     // void mqttCallback(char *topic, byte *payload, unsigned int length);
     // mqtt_client.setCallback(mqttCallback); // TODO: callback for subscribes
   }
 
   void state_wifi_connected_task() {
-    if (millis() - mqtt_connecting_start_millis > MQTT_WAITING_TIMEOUT_MS) {
+    if (millis() - mqtt_connecting_start_millis > GCN_MQTT_WAITING_TIMEOUT_MS) {
       Serial.print("Exhausted available wait time to connect to MQTT, aborting");
       set_state(MAIN_STATE_ERROR);
       return;
     }
 
     String mac = String(WiFi.macAddress());
-    String will_topic = String(MQTT_BROKER_APP_TOPIC) + String("/") + mac + String("/") + String(MQTT_BROKER_WILL_SUBTOPIC);
+    String will_topic = String(GCN_MQTT_BROKER_APP_TOPIC) + String("/") + mac + String("/") + String(GCN_MQTT_BROKER_WILL_SUBTOPIC);
     std::replace(mac.begin(), mac.end(), ':', '_');
-    String mqtt_client_id = String(MQTT_BROKER_APP_TOPIC) + String("-") + mac;
+    String mqtt_client_id = String(GCN_MQTT_BROKER_APP_TOPIC) + String("-") + mac;
 
-    Serial.print("MQTT-client-id ");
+    Serial.print("MQTTclient-id ");
     Serial.print(mqtt_client_id.c_str());
-    Serial.print("MQTT-will topic ");
+    Serial.print("MQTT will topic ");
     Serial.print(will_topic.c_str());
     Serial.print(" qos ");
-    Serial.print(MQTT_BROKER_WILL_QOS);
+    Serial.print(GCN_MQTT_BROKER_WILL_QOS);
     Serial.print(" retain ");
-    Serial.print(MQTT_BROKER_WILL_RETAIN ? "yes" : "NO");
+    Serial.print(GCN_MQTT_BROKER_WILL_RETAIN ? "yes" : "NO");
     Serial.print(" message ");
-    Serial.println(MQTT_BROKER_WILL_MESSAGE);
+    Serial.println(GCN_MQTT_BROKER_WILL_MESSAGE);
 
     bool success = mqtt_client.connect(
       mqtt_client_id.c_str(),
-      MQTT_BROKER_USERNAME, MQTT_BROKER_PASSWORD,
-      will_topic.c_str(), MQTT_BROKER_WILL_QOS, MQTT_BROKER_WILL_RETAIN, MQTT_BROKER_WILL_MESSAGE,
-      MQTT_BROKER_CLEAN_SESSION);
-    Serial.print("MQTT-connect result ");
-    Serial.print(success ? "connected" : "disconnected");
-    Serial.print(" state ");
-    Serial.println(mqtt_client.state());  // http://pubsubclient.knolleary.net/api#state
+      GCN_MQTT_BROKER_USER_NAME, GCN_MQTT_BROKER_PASSWORD,
+      will_topic.c_str(), GCN_MQTT_BROKER_WILL_QOS, GCN_MQTT_BROKER_WILL_RETAIN, GCN_MQTT_BROKER_WILL_MESSAGE,
+      GCN_MQTT_BROKER_CLEAN_SESSION);
 
-    if (success) {
-      set_state(MAIN_STATE_MQTT_CONNECTED);
+    if (!success) {
+      Serial.print("MQTT connect failed at ");
+      Serial.print(millis());
+      Serial.print(" ms, state=");
+      Serial.println(mqtt_client.state());  // http://pubsubclient.knolleary.net/api#state
+      return;
     }
 
-    delay(10000);
+    if (!publish(will_topic.c_str(), GCN_MQTT_BROKER_BORN_MESSAGE, true)) {
+      Serial.println("MQTT 'born' message could not be published to will topic");
+    }
+
+    set_state(MAIN_STATE_MQTT_CONNECTED);
   }
 
   void state_mqtt_connected_enter() {
@@ -479,14 +501,18 @@ private:
     Serial.print("MQTT connected after ");
     Serial.print(millis() - mqtt_connecting_start_millis);
     Serial.println(" ms");
-    // TODO: subscribe
+    // TODO: subscribe to gcn/%u/in/command
   }
 
   void state_mqtt_connected_task() {
-    Serial.print("state_mqtt_connected_task ");
-    Serial.println(millis());
-    delay(1000);
-    // TODO: publish
+    Serial.print("mqtt connected seconds ");
+    Serial.println((unsigned long)millis() / 1000L);
+    delay(10000);
+    // TODO: read initial input states
+    // TODO: read current input stats
+    // TODO: compute changes
+    // TODO: store current as initial
+    // TODO: publish changes in topics gcn/%u/out/pins/i with retain ?
   }
 
   void state_default_enter() {
@@ -497,11 +523,6 @@ private:
     Serial.print("Invalid main state ");
     Serial.println(main_state);
     set_state(MAIN_STATE_ERROR);
-  }
-
-public:
-  MainStateMachine(PubSubClient &mqtt_client, LightStateMachine &light_state_machine)
-    : mqtt_client(mqtt_client), light_state_machine(light_state_machine), main_state(MAIN_STATE_BOOT) {
   }
 
   bool is_wifi_connected() {
@@ -518,6 +539,24 @@ public:
     return mqtt_client.connected();
   }
 
+  bool publish(const String &topic, const String &message, bool retain) {
+    bool result = mqtt_client.publish(topic.c_str(), message.c_str(), retain);
+#ifdef GCN_DEBUG_MQTT_PUBLISH
+    Serial.print("MQTT publish ");
+    Serial.print(result);
+    Serial.print(" topic ");
+    Serial.print(topic.c_str());
+    Serial.print(" message ");
+    Serial.println(message.c_str());
+#endif  // GCN_DEBUG_MQTT_PUBLISH
+    return result;
+  }
+
+public:
+  MainStateMachine(PubSubClient &mqtt_client, LightStateMachine &light_state_machine)
+    : mqtt_client(mqtt_client), light_state_machine(light_state_machine), main_state(MAIN_STATE_BOOT) {
+  }
+
   void update() {
     run_tasks();
     light_state_machine.update();
@@ -528,10 +567,15 @@ public:
     }
 
     // watchdogs
-    if (millis() > PERIODIC_REBOOT_AFTER_MS) {
+#ifdef GCN_PERIODIC_REBOOT_AFTER_MS
+    if (millis() > GCN_PERIODIC_REBOOT_AFTER_MS) {
+      Serial.print("Maximum running time reached ");
+      Serial.print(GCN_PERIODIC_REBOOT_AFTER_MS);
+      Serial.println(" ms");
       set_state(MAIN_STATE_REBOOT);
       return;
     }
+#endif  // GCN_PERIODIC_REBOOT_AFTER_MS
     if (!is_wifi_connected() && main_state >= MAIN_STATE_WIFI_CONNECTED) {
       Serial.println("Detected WiFi disconnection");
       set_state(MAIN_STATE_WIFI_NOT_CONNECTED);
@@ -547,8 +591,8 @@ public:
 
 WiFiClient espClient;
 PubSubClient mqtt_client(espClient);
-ArduinoOutputPin status_pin(STATUS_LED_PIN, false);
-LightStateMachine light_state_machine(status_pin, LIGHT_SHORT_DURATION_MS, LIGHT_LONG_DURATION_MS);
+ArduinoOutputPin status_pin(GCN_STATUS_LED_PIN, false);
+LightStateMachine light_state_machine(status_pin, GCN_LIGHT_SHORT_DURATION_MS, GCN_LIGHT_LONG_DURATION_MS);
 MainStateMachine main_state_machine(mqtt_client, light_state_machine);
 
 void setup() {
