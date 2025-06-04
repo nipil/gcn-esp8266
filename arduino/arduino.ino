@@ -1,4 +1,5 @@
 #include <ESP8266WiFi.h>
+#include <PubSubClient.h>
 
 // ESP8266 default baud rate on boot
 #define SERIAL_BAUD 74880
@@ -8,10 +9,25 @@
 #define STATUS_LED_INVERT true
 
 // General behaviour
-#define WIFI_WAITING_TIMEOUT_MS 10000
-#define ERROR_WAITING_BEFORE_REBOOT_MS 10000
+#define PERIODIC_REBOOT_AFTER_MS (24 * 60 * 60 * 1000)
+#define WIFI_WAITING_TIMEOUT_MS (10 * 1000)
+#define MQTT_WAITING_TIMEOUT_MS (10 * 1000)
+#define ERROR_WAITING_BEFORE_REBOOT_MS (10 * 1000)
 #define LIGHT_SHORT_DURATION_MS 100
 #define LIGHT_LONG_DURATION_MS 1000
+
+// MQTT
+// https://test.mosquitto.org for the various available setups
+#define MQTT_BROKER_DNS_NAME "test.mosquitto.org"
+#define MQTT_BROKER_TCP_PORT 1883
+#define MQTT_BROKER_USERNAME NULL
+#define MQTT_BROKER_PASSWORD NULL
+#define MQTT_BROKER_APP_TOPIC "gcn"
+#define MQTT_BROKER_WILL_SUBTOPIC "status"
+#define MQTT_BROKER_WILL_QOS 1
+#define MQTT_BROKER_WILL_RETAIN true
+#define MQTT_BROKER_WILL_MESSAGE "offline"
+#define MQTT_BROKER_CLEAN_SESSION true
 
 // Serial debugging
 // #define DEBUG_ARDUINO_OUTPUT_PIN
@@ -25,12 +41,8 @@ typedef struct
 } WifiCredential;
 
 const WifiCredential wifi_credentials[] = {
-  { "your_ssid", "your_password"},
+  { "your_ssid", "your_password" },
 };
-
-// See https://test.mosquitto.org for the various available setups
-#define MQTT_BROKER_DNS_NAME "test.mosquitto.org"
-#define MQTT_BROKER_TCP_PORT 1883
 
 void (*resetFunc)(void) = 0;
 
@@ -216,26 +228,33 @@ public:
 class MainStateMachine {
 private:
   typedef enum {
-    MAIN_STATE_ERROR = -1,
+    MAIN_STATE_ERROR = -2,
+    MAIN_STATE_REBOOT = -1,
     MAIN_STATE_BOOT = 0,
     MAIN_STATE_WIFI_NOT_CONNECTED = 10,
-    MAIN_STATE_WIFI_START = 11,
-    MAIN_STATE_WIFI_WAITING = 12,
-    MAIN_STATE_WIFI_CONNECTED = 13
+    MAIN_STATE_WIFI_TRY_CONFIG = 11,
+    MAIN_STATE_WIFI_CONNECTED = 12,
+    MAIN_STATE_MQTT_CONNECTED = 20,
   } MainState;
 
   const int WIFI_CREDENTIALS_COUNT = sizeof(wifi_credentials) / sizeof(WifiCredential);
 
+  PubSubClient &mqtt_client;
   LightStateMachine &light_state_machine;
   MainState main_state;
   int wifi_credentials_index;
-  unsigned long wifi_connecting_start_millis;
   unsigned long error_detected_millis;
+  unsigned long wifi_connecting_start_millis;
+  unsigned long mqtt_connecting_start_millis;
+  int last_wifi_status;
 
   void run_enters() {
     switch (main_state) {
       case MAIN_STATE_ERROR:
         state_error_enter();
+        break;
+      case MAIN_STATE_REBOOT:
+        state_reboot_enter();
         break;
       case MAIN_STATE_BOOT:
         state_boot_enter();
@@ -243,14 +262,14 @@ private:
       case MAIN_STATE_WIFI_NOT_CONNECTED:
         state_wifi_not_connected_enter();
         break;
-      case MAIN_STATE_WIFI_START:
-        state_wifi_start_enter();
-        break;
-      case MAIN_STATE_WIFI_WAITING:
-        state_wifi_waiting_enter();
+      case MAIN_STATE_WIFI_TRY_CONFIG:
+        state_wifi_try_config_enter();
         break;
       case MAIN_STATE_WIFI_CONNECTED:
         state_wifi_connected_enter();
+        break;
+      case MAIN_STATE_MQTT_CONNECTED:
+        state_mqtt_connected_enter();
         break;
       default:
         state_default_enter();
@@ -263,20 +282,23 @@ private:
       case MAIN_STATE_ERROR:
         state_error_task();
         break;
+      case MAIN_STATE_REBOOT:
+        state_reboot_task();
+        break;
       case MAIN_STATE_BOOT:
         state_boot_task();
         break;
       case MAIN_STATE_WIFI_NOT_CONNECTED:
         state_wifi_not_connected_task();
         break;
-      case MAIN_STATE_WIFI_START:
-        state_wifi_start_task();
-        break;
-      case MAIN_STATE_WIFI_WAITING:
-        state_wifi_waiting_task();
+      case MAIN_STATE_WIFI_TRY_CONFIG:
+        state_wifi_try_config_task();
         break;
       case MAIN_STATE_WIFI_CONNECTED:
         state_wifi_connected_task();
+        break;
+      case MAIN_STATE_MQTT_CONNECTED:
+        state_mqtt_connected_task();
         break;
       default:
         state_default_task();
@@ -307,6 +329,30 @@ private:
     }
   }
 
+  void state_reboot_enter() {
+    Serial.print("Maximum running time reached ");
+    Serial.print(PERIODIC_REBOOT_AFTER_MS);
+    Serial.println(" ms");
+  }
+
+  void state_reboot_task() {
+    reboot();
+  }
+
+  void state_boot_enter() {
+    Serial.println("Cannot re-enter initial boot state without an actual reboot");
+    set_state(MAIN_STATE_ERROR);
+  }
+
+  void state_boot_task() {
+    Serial.begin(SERIAL_BAUD);
+    Serial.print("MQTT client MAC address is ");
+    Serial.println(WiFi.macAddress());
+    light_state_machine.setup();
+    WiFi.mode(WIFI_STA);
+    set_state(MAIN_STATE_WIFI_NOT_CONNECTED);
+  }
+
   void state_wifi_not_connected_enter() {
     if (WIFI_CREDENTIALS_COUNT == 0) {
       Serial.println("No available wifi credentials to try");
@@ -315,18 +361,21 @@ private:
     }
     light_state_machine.start(2);
     wifi_credentials_index = 0;
-    set_state(MAIN_STATE_WIFI_START);
+    set_state(MAIN_STATE_WIFI_TRY_CONFIG);
   }
 
   void state_wifi_not_connected_task() {
     // no continuous action
   }
 
-  void state_wifi_start_enter() {
-    wifi_connecting_start_millis = millis();
+  void state_wifi_try_config_enter() {
+    if (wifi_credentials_index >= WIFI_CREDENTIALS_COUNT) {
+      Serial.print("Exhausted available wifi credentials, aborting");
+      set_state(MAIN_STATE_ERROR);
+      return;
+    }
 
     const WifiCredential *credential = &wifi_credentials[wifi_credentials_index];
-
     Serial.print("Trying WiFi credential ");
     Serial.print(wifi_credentials_index);
     Serial.print(" SSID=");
@@ -334,32 +383,22 @@ private:
     Serial.print(" password=");
     Serial.println(credential->password);
 
+    wifi_connecting_start_millis = millis();
     WiFi.begin(credential->ssid, credential->password);
 
-    set_state(MAIN_STATE_WIFI_WAITING);
+    last_wifi_status = WiFi.status();
+    Serial.print("Initial wifi status ");
+    Serial.println(last_wifi_status);
   }
 
-  void state_wifi_start_task() {
-    // no continuous action
-  }
-
-  void state_wifi_waiting_enter() {
-    // no initial action
-  }
-
-  void state_wifi_waiting_task() {
-    unsigned long wifi_elapsed_ms = millis() - wifi_connecting_start_millis;
+  void state_wifi_try_config_task() {
     if (is_wifi_connected()) {
-      Serial.print("Wifi connected after ");
-      Serial.print(wifi_elapsed_ms);
-      Serial.println(" ms");
-
-      light_state_machine.permanent();
+      Serial.println("is_wifi_connected");
       set_state(MAIN_STATE_WIFI_CONNECTED);
       return;
     }
 
-    if (wifi_elapsed_ms < WIFI_WAITING_TIMEOUT_MS) {
+    if (millis() - wifi_connecting_start_millis < WIFI_WAITING_TIMEOUT_MS) {
       return;  // wait more
     }
 
@@ -367,22 +406,87 @@ private:
     Serial.print(WIFI_WAITING_TIMEOUT_MS);
     Serial.println(" ms");
 
-    if (wifi_credentials_index >= WIFI_CREDENTIALS_COUNT) {
-      Serial.print("Exhausted available wifi credentials, aborting");
+    wifi_credentials_index++;
+    set_state(MAIN_STATE_WIFI_TRY_CONFIG);
+  }
+
+  void state_wifi_connected_enter() {
+    Serial.print("Wifi connected after ");
+    Serial.print(millis() - wifi_connecting_start_millis);
+    Serial.println(" ms");
+    Serial.print("Local IP address is ");
+    Serial.println(WiFi.localIP());
+
+    mqtt_connecting_start_millis = millis();
+
+    if (is_mqtt_connected()) {
+      Serial.println("MQTT client already connected... WEIRD !");
+      set_state(MAIN_STATE_MQTT_CONNECTED);
+    }
+
+    Serial.print("Will connect to MQTT server ");
+    Serial.print(MQTT_BROKER_DNS_NAME);
+    Serial.print(" port ");
+    Serial.println(MQTT_BROKER_TCP_PORT);
+    mqtt_client.setServer(MQTT_BROKER_DNS_NAME, MQTT_BROKER_TCP_PORT);
+
+    // void mqttCallback(char *topic, byte *payload, unsigned int length);
+    // mqtt_client.setCallback(mqttCallback); // TODO: callback for subscribes
+  }
+
+  void state_wifi_connected_task() {
+    if (millis() - mqtt_connecting_start_millis > MQTT_WAITING_TIMEOUT_MS) {
+      Serial.print("Exhausted available wait time to connect to MQTT, aborting");
       set_state(MAIN_STATE_ERROR);
       return;
     }
 
-    wifi_credentials_index++;
-    set_state(MAIN_STATE_WIFI_START);
+    String mac = String(WiFi.macAddress());
+    String will_topic = String(MQTT_BROKER_APP_TOPIC) + String("/") + mac + String("/") + String(MQTT_BROKER_WILL_SUBTOPIC);
+    std::replace(mac.begin(), mac.end(), ':', '_');
+    String mqtt_client_id = String(MQTT_BROKER_APP_TOPIC) + String("-") + mac;
+
+    Serial.print("MQTT-client-id ");
+    Serial.print(mqtt_client_id.c_str());
+    Serial.print("MQTT-will topic ");
+    Serial.print(will_topic.c_str());
+    Serial.print(" qos ");
+    Serial.print(MQTT_BROKER_WILL_QOS);
+    Serial.print(" retain ");
+    Serial.print(MQTT_BROKER_WILL_RETAIN ? "yes" : "NO");
+    Serial.print(" message ");
+    Serial.println(MQTT_BROKER_WILL_MESSAGE);
+
+    bool success = mqtt_client.connect(
+      mqtt_client_id.c_str(),
+      MQTT_BROKER_USERNAME, MQTT_BROKER_PASSWORD,
+      will_topic.c_str(), MQTT_BROKER_WILL_QOS, MQTT_BROKER_WILL_RETAIN, MQTT_BROKER_WILL_MESSAGE,
+      MQTT_BROKER_CLEAN_SESSION);
+    Serial.print("MQTT-connect result ");
+    Serial.print(success ? "connected" : "disconnected");
+    Serial.print(" state ");
+    Serial.println(mqtt_client.state());  // http://pubsubclient.knolleary.net/api#state
+
+    if (success) {
+      set_state(MAIN_STATE_MQTT_CONNECTED);
+    }
+
+    delay(10000);
   }
 
-  void state_wifi_connected_enter() {
-    // TODO: connect to MQTT
+  void state_mqtt_connected_enter() {
+    light_state_machine.permanent();
+    Serial.print("MQTT connected after ");
+    Serial.print(millis() - mqtt_connecting_start_millis);
+    Serial.println(" ms");
+    // TODO: subscribe
   }
 
-  void state_wifi_connected_task() {
-    // TODO: connect to MQTT
+  void state_mqtt_connected_task() {
+    Serial.print("state_mqtt_connected_task ");
+    Serial.println(millis());
+    delay(1000);
+    // TODO: publish
   }
 
   void state_default_enter() {
@@ -395,44 +499,57 @@ private:
     set_state(MAIN_STATE_ERROR);
   }
 
-  void state_boot_enter() {
-    Serial.println("Cannot re-enter initial boot state without an actual reboot");
-    set_state(MAIN_STATE_ERROR);
-  }
-
-  void state_boot_task() {
-    Serial.begin(SERIAL_BAUD);
-    Serial.print("Wifi MAC address is ");
-    Serial.println(WiFi.macAddress());
-    light_state_machine.setup();
-    WiFi.mode(WIFI_STA);
-    set_state(MAIN_STATE_WIFI_NOT_CONNECTED);
-  }
-
 public:
-  MainStateMachine(LightStateMachine &light_state_machine)
-    : light_state_machine(light_state_machine), main_state(MAIN_STATE_BOOT) {
+  MainStateMachine(PubSubClient &mqtt_client, LightStateMachine &light_state_machine)
+    : mqtt_client(mqtt_client), light_state_machine(light_state_machine), main_state(MAIN_STATE_BOOT) {
   }
 
-  bool is_wifi_connected() const {
-    return WiFi.status() == WL_CONNECTED;
+  bool is_wifi_connected() {
+    wl_status_t status = WiFi.status();
+    if (status != last_wifi_status) {
+      last_wifi_status = status;
+      Serial.print("Wifi status changed to ");
+      Serial.println(status);
+    }
+    return status == WL_CONNECTED;
+  }
+
+  bool is_mqtt_connected() const {
+    return mqtt_client.connected();
   }
 
   void update() {
-    // common watchdog for wifi disconnections
-    if (!is_wifi_connected() && main_state >= MAIN_STATE_WIFI_CONNECTED) {
-      set_state(MAIN_STATE_WIFI_NOT_CONNECTED);
+    run_tasks();
+    light_state_machine.update();
+
+    // keepalives
+    if (is_mqtt_connected()) {
+      mqtt_client.loop();
     }
 
-    run_tasks();
-
-    light_state_machine.update();
+    // watchdogs
+    if (millis() > PERIODIC_REBOOT_AFTER_MS) {
+      set_state(MAIN_STATE_REBOOT);
+      return;
+    }
+    if (!is_wifi_connected() && main_state >= MAIN_STATE_WIFI_CONNECTED) {
+      Serial.println("Detected WiFi disconnection");
+      set_state(MAIN_STATE_WIFI_NOT_CONNECTED);
+      return;
+    }
+    if (!is_mqtt_connected() && main_state >= MAIN_STATE_MQTT_CONNECTED) {
+      Serial.println("Detected MQTT disconnection");
+      set_state(MAIN_STATE_WIFI_CONNECTED);
+      return;
+    }
   }
 };
 
+WiFiClient espClient;
+PubSubClient mqtt_client(espClient);
 ArduinoOutputPin status_pin(STATUS_LED_PIN, false);
 LightStateMachine light_state_machine(status_pin, LIGHT_SHORT_DURATION_MS, LIGHT_LONG_DURATION_MS);
-MainStateMachine main_state_machine(light_state_machine);
+MainStateMachine main_state_machine(mqtt_client, light_state_machine);
 
 void setup() {
 }
