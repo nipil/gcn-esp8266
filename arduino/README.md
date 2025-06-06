@@ -10,6 +10,10 @@ Thanks to https://www.emqx.com/en/blog/esp8266-connects-to-the-public-mqtt-broke
 
 - Tools / Board ... / Board manager
   - search 8266, and install (version 3.1.2 as of this writing)
+    - Documentation : https://github.com/esp8266/Arduino (uses https://www.bearssl.org/ for SSL)
+    - Debugging : https://arduino-esp8266.readthedocs.io/en/latest/Troubleshooting/debugging.html
+        - Tools / Debug Port / Serial
+        - Tools / Debug Level / SSL to debug BearSSL
 
 - Tools / Board ... / esp8266 / NodeMCU 1.0 ESP-12E module
 
@@ -28,6 +32,7 @@ Thanks to https://www.emqx.com/en/blog/esp8266-connects-to-the-public-mqtt-broke
 
 - Tools / Manage libraries
   - `PubSubClient` by Nick O'Leary (version 2.8.0 as of this writing)
+    - Documentation : http://pubsubclient.knolleary.net/
 
 ## How it works
 
