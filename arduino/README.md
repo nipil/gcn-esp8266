@@ -2,6 +2,8 @@
 
 Thanks to https://www.emqx.com/en/blog/esp8266-connects-to-the-public-mqtt-broker for the tutorial.
 
+IMPORTANT : only LetsEncrypt CA certificates are included for secure (verified) TLS.
+
 ## Board setup
 
 - File / Preferences
@@ -16,6 +18,8 @@ Thanks to https://www.emqx.com/en/blog/esp8266-connects-to-the-public-mqtt-broke
         - Tools / Debug Level / SSL to debug BearSSL
 
 - Tools / Board ... / esp8266 / NodeMCU 1.0 ESP-12E module
+
+- Tools / CPU Frequency / 160 MHz (better when dealing with TLS)
 
 - Use the board and port dropdown
   - select "other board and port"

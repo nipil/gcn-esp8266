@@ -1,6 +1,8 @@
 // GPIO CHANGE NOTIFIER (C) NIPIL 2025+
 
 #include <ESP8266WiFi.h>
+#include "TZ.h"
+#include "sntp.h"
 #include <PubSubClient.h>
 
 // Change according to your various WiFi networks
@@ -18,7 +20,6 @@
 #define GCN_MQTT_BROKER_TCP_PORT 1883
 #define GCN_MQTT_BROKER_USER_NAME_UTF8 NULL
 #define GCN_MQTT_BROKER_PASSWORD NULL
-#define GCN_MQTT_CLIENT_INSECURE false  // TODO: remove feature after debugging TLS verification and CA certs
 
 // Functional parameters
 #define GCN_STATUS_LED_PIN LED_BUILTIN
@@ -30,10 +31,22 @@
 #define GCN_SERIAL_BAUD 74880  // ESP8266 default baud rate on boot
 #define GCN_PERIODIC_REBOOT_AFTER_MS (24 * 60 * 60 * 1000)
 #define GCN_WIFI_WAITING_TIMEOUT_MS (10 * 1000)
-#define GCN_MQTT_WAITING_TIMEOUT_MS (30 * 1000)
+#define GCN_SNTP_WAITING_TIMEOUT_MS (15 * 1000)
+#define GCN_MQTT_BROKER_RETRY_MS (5 * 1000)
 #define GCN_LOOP_MIN_DELAY_MS 10
 #define GCN_LIGHT_SHORT_DURATION_MS 100
 #define GCN_LIGHT_LONG_DURATION_MS 1000
+
+// TLS timings for mqtt_client.connect()
+// - each failed attempt blocks for about 16 seconds
+// - requires about 3 seconds when succeeding
+#define GCN_MQTT_WAITING_TIMEOUT_MS (60 * 1000)
+
+// SNTP data
+#define GCN_SNTP_TIMEZONE TZ_Europe_Paris  // from Arduino/cores/esp8266/TZ.h
+#define GCN_SNTP_SERVER1 "fr.pool.ntp.org"
+#define GCN_SNTP_SERVER2 "ntp.ripe.net"
+#define GCN_SNTP_SERVER3 "time.apple.com"
 
 // MQTT data
 #define GCN_MQTT_BROKER_APP_TOPIC "gcn"
@@ -46,19 +59,26 @@
 #define GCN_MQTT_BROKER_BORN_MESSAGE "online"
 #define GCN_MQTT_BROKER_CLEAN_SESSION true
 
+// TLS security
+#define GCN_SSL_VERSION_MIN BR_TLS12  // Arduino/tools/sdk/include/bearssl/bearssl_ssl.h
+#define GCN_SSL_VERSION_MAX BR_TLS12  // no support yet for TLS 1.3 in BearSSL
+#include "trusted_ca_certs.h"         // CA Certificates used as root of trust
+
+
 // Optional behaviours
-#define GCN_DEBUG_MAIN_STATE_MACHINE
-#define GCN_DEBUG_WIFI_STATUS_CHANGES
-#define GCN_DEBUG_MQTT_STATUS_CHANGES
-#define GCN_DEBUG_LIGHT_STATE_MACHINE
+// #define GCN_DEBUG_WIFI_STATUS_CHANGES
+// #define GCN_DEBUG_MQTT_STATUS_CHANGES
+// #define GCN_DEBUG_MAIN_STATE_MACHINE
+// #define GCN_DEBUG_LIGHT_STATE_MACHINE
 // #define GCN_DEBUG_ARDUINO_OUTPUT_PIN
 // #define GCN_DEBUG_MQTT_PUBLISH
-#define GCN_DEBUG_MQTT_SUBSCRIBE
+// #define GCN_DEBUG_MQTT_SUBSCRIBE
 
 // Input commands
 #define GCN_COMMAND_REBOOT "reboot"
 #define GCN_COMMAND_DISCONNECT_WIFI "disconnect_wifi"
 #define GCN_COMMAND_DISCONNECT_MQTT "disconnect_mqtt"
+#define GCN_COMMAND_SYNCHRONIZE_SNTP "synchronize_sntp"
 
 // Use dedicated header to customize setting without modifying main code
 // You just have to #undef what you want to change, then #define it with the new value
@@ -155,7 +175,7 @@ private:
     MAIN_STATE_WIFI_NOT_CONNECTED = 10,
     MAIN_STATE_WIFI_TRY_CONFIG = 11,
     MAIN_STATE_WIFI_CONNECTED = 12,
-    MAIN_STATE_NTP_CONNECTED = 20,
+    MAIN_STATE_SNTP_CONNECTED = 20,
     MAIN_STATE_MQTT_CONNECTED = 30,
   } MainState;
 
@@ -163,14 +183,15 @@ private:
   const String mqtt_client_id_utf8 = mqtt_get_client_id_utf8();
 
   int wifi_credentials_index;
-  WiFiClientSecure wifi_client_secure;
   PubSubClient &mqtt_client;
   LightStateMachine &light_state_machine;
   MainState main_state;
 
-  unsigned long last_wifi_begin;
+  unsigned long last_wifi_begin_ms;
   IPAddress last_wifi_address;
-  unsigned long last_mqtt_begin;
+  unsigned long last_sntp_begin_ms;
+  unsigned long last_mqtt_begin_ms;
+  unsigned long next_mqtt_retry_ms;
 
 #ifdef GCN_DEBUG_WIFI_STATUS_CHANGES
   wl_status_t last_wifi_status = WL_NO_SHIELD;
@@ -196,12 +217,16 @@ private:
   void state_wifi_try_config_task();
   void state_wifi_connected_enter();
   void state_wifi_connected_task();
+  void state_sntp_connected_enter();
+  void state_sntp_connected_task();
   void state_mqtt_connected_enter();
   void state_mqtt_connected_task();
   void state_default_enter();
   void state_default_task();
   bool is_wifi_connected();
+  bool is_sntp_connected();
   bool is_mqtt_connected();
+  void sntp_resynchronize();
   bool mqtt_publish_topic_string(const String &topic, const String &message, bool retain);
   bool mqtt_subscribe_topic(const String &topic_utf8, int qos);
   String mqtt_get_client_id_utf8();
@@ -211,11 +236,11 @@ private:
 };
 
 // Dependency injection
-
 #if GCN_MQTT_BROKER_IS_SECURE
-WiFiClient wifi_client;
-#else
+X509List ca_certs;
 WiFiClientSecure wifi_client;
+#else
+WiFiClient wifi_client;
 #endif
 PubSubClient mqtt_client(GCN_MQTT_BROKER_DNS_NAME, GCN_MQTT_BROKER_TCP_PORT, main_state_machine_mqtt_callback, wifi_client);
 ArduinoOutputPin status_pin(GCN_STATUS_LED_PIN, GCN_STATUS_LED_INVERT);

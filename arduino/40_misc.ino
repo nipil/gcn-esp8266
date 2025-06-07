@@ -19,6 +19,35 @@ void setup() {
     Serial.println(WIFI_CREDENTIALS[i].ssid);
   }
   print_millis();
+  Serial.print("Will use SNTP timezone definition ");
+  Serial.println(GCN_SNTP_TIMEZONE);
+#ifdef GCN_SNTP_SERVER1
+  print_millis();
+  Serial.print("Will use SNTP server ");
+  Serial.println(GCN_SNTP_SERVER1);
+#endif  // GCN_SNTP_SERVER1
+#ifdef GCN_SNTP_SERVER2
+  print_millis();
+  Serial.print("Will use SNTP server ");
+  Serial.println(GCN_SNTP_SERVER2);
+#endif  // GCN_SNTP_SERVER2
+#ifdef GCN_SNTP_SERVER3
+  print_millis();
+  Serial.print("Will use SNTP server ");
+  Serial.println(GCN_SNTP_SERVER3);
+#endif  // GCN_SNTP_SERVER3
+#if GCN_MQTT_BROKER_IS_SECURE
+  print_millis();
+  Serial.print("Loading CA Certificate into BearSSL: ");
+  Serial.println(ca_cert_pem_1);
+  ca_certs.append(ca_cert_pem_1);
+  Serial.print("Loading CA Certificate into BearSSL: ");
+  Serial.println(ca_cert_pem_2);
+  ca_certs.append(ca_cert_pem_2);
+  wifi_client.setTrustAnchors(&ca_certs);
+  wifi_client.setSSLVersion(GCN_SSL_VERSION_MIN, GCN_SSL_VERSION_MAX);
+#endif
+  print_millis();
   Serial.print("Will use MQTT server ");
   Serial.print(GCN_MQTT_BROKER_DNS_NAME);
   Serial.print(" port ");

@@ -26,6 +26,9 @@ void MainStateMachine::run_enters() {
     case MAIN_STATE_WIFI_CONNECTED:
       state_wifi_connected_enter();
       break;
+    case MAIN_STATE_SNTP_CONNECTED:
+      state_sntp_connected_enter();
+      break;
     case MAIN_STATE_MQTT_CONNECTED:
       state_mqtt_connected_enter();
       break;
@@ -54,6 +57,9 @@ void MainStateMachine::run_tasks() {
       break;
     case MAIN_STATE_WIFI_CONNECTED:
       state_wifi_connected_task();
+      break;
+    case MAIN_STATE_SNTP_CONNECTED:
+      state_sntp_connected_task();
       break;
     case MAIN_STATE_MQTT_CONNECTED:
       state_mqtt_connected_task();
@@ -99,6 +105,7 @@ void MainStateMachine::state_boot_task() {
   print_millis();
   Serial.print("MQTT client-id ");
   Serial.println(mqtt_client_id_utf8.c_str());
+  print_millis();
   Serial.print("MQTT will topic ");
   Serial.print(mqtt_will_topic_utf8.c_str());
   Serial.print(" qos ");

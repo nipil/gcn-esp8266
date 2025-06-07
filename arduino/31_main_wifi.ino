@@ -112,13 +112,14 @@ void MainStateMachine::state_wifi_try_config_enter() {
   print_wifi_status_value_name(last_wifi_status);
   Serial.println();
 #endif  // GCN_DEBUG_WIFI_STATUS_CHANGES
-  last_wifi_begin = millis();
+  last_wifi_begin_ms = millis();
   WiFi.begin(credential->ssid, credential->password);
 }
 
 void MainStateMachine::state_wifi_try_config_task() {
-  unsigned long elapsed = millis() - last_wifi_begin;
+  unsigned long elapsed = millis() - last_wifi_begin_ms;
   if (is_wifi_connected()) {
+    print_millis();
     Serial.print("Wifi connection established in ");
     Serial.print(elapsed);
     Serial.println("ms");
@@ -137,48 +138,53 @@ void MainStateMachine::state_wifi_try_config_task() {
 }
 
 void MainStateMachine::state_wifi_connected_enter() {
-  last_mqtt_begin = millis();
+  last_sntp_begin_ms = millis();
+  print_millis();
+  Serial.println("Trying to synchronize time via SNTP");
+  configTime(
+    GCN_SNTP_TIMEZONE,
+#ifdef GCN_SNTP_SERVER1
+    GCN_SNTP_SERVER1,
+#else
+    nullptr,
+#endif  // GCN_SNTP_SERVER1
+#ifdef GCN_SNTP_SERVER2
+    GCN_SNTP_SERVER2,
+#else
+    nullptr,
+#endif  // GCN_SNTP_SERVER2
+#ifdef GCN_SNTP_SERVER3
+    GCN_SNTP_SERVER3
+#else
+    nullptr
+#endif  // GCN_SNTP_SERVER3
+  );
 }
 
 void MainStateMachine::state_wifi_connected_task() {
-  unsigned long elapsed = millis() - last_mqtt_begin;
+  unsigned long elapsed = millis() - last_sntp_begin_ms;
 
-  if (elapsed > GCN_MQTT_WAITING_TIMEOUT_MS) {
+  if (elapsed > GCN_SNTP_WAITING_TIMEOUT_MS) {
     print_millis();
-    Serial.print("Failed to connect to MQTT after ");
+    Serial.print("Failed to synchronize to SNTP after ");
     Serial.print(elapsed);
     Serial.println("ms");
     set_state(MAIN_STATE_ERROR);
     return;
   }
 
-#if GCN_MQTT_CLIENT_INSECURE
-  Serial.println("Disabling TLS verification on MQTT client making it INSECURE");
-  wifi_client_secure.setInsecure();
-  mqtt_client.setClient(wifi_client_secure);
-#endif
-
-  bool success = mqtt_client.connect(
-    mqtt_client_id_utf8.c_str(),
-    GCN_MQTT_BROKER_USER_NAME_UTF8, GCN_MQTT_BROKER_PASSWORD,
-    mqtt_will_topic_utf8.c_str(), GCN_MQTT_BROKER_WILL_QOS, GCN_MQTT_BROKER_WILL_RETAIN, GCN_MQTT_BROKER_WILL_MESSAGE,
-    GCN_MQTT_BROKER_CLEAN_SESSION);
-
-  print_millis();
-  Serial.print("MQTT connect ");
-  Serial.print(success ? "OK" : "FAIL");
-  Serial.print(" state=");
-  Serial.println(mqtt_client.state());
-
-  if (!success) {
+  if (!is_sntp_connected()) {
     delay(1000);
     return;
   }
 
-  if (!mqtt_publish_topic_string(mqtt_will_topic_utf8.c_str(), GCN_MQTT_BROKER_BORN_MESSAGE, true)) {
-    print_millis();
-    Serial.println("MQTT 'born' message could not be published to will topic");
-  }
+  print_millis();
+  Serial.print("Synchronized with SNTP ");
+  time_t now = time(nullptr);
+  struct tm timeinfo;
+  gmtime_r(&now, &timeinfo);
+  Serial.print("Current time: ");
+  Serial.print(asctime(&timeinfo));
 
-  set_state(MAIN_STATE_MQTT_CONNECTED);
+  set_state(MAIN_STATE_SNTP_CONNECTED);
 }

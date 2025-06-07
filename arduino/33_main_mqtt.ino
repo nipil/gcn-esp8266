@@ -7,34 +7,49 @@ void main_state_machine_mqtt_callback(char *topic_utf8, byte *payload, unsigned 
   Serial.print(length);
   Serial.print(" bytes topic ");
   Serial.println(topic_utf8);
-  for (int i = 0; i < length; i++) {
-    Serial.print(payload[i], HEX);
-  }
-  Serial.println();
-  for (int i = 0; i < length; i++) {
-    char value = (char)payload[i];
-    Serial.print(' ');
-    if (value >= 0x20 && value <= 0x7F) {  // ASCII range
-      Serial.print(value);
-    } else {
-      Serial.print(' ');  // replacement character
+  if (length > 0) {
+    for (int i = 0; i < length; i++) {
+      Serial.print(payload[i], HEX);
     }
+    Serial.println();
+    for (int i = 0; i < length; i++) {
+      char value = (char)payload[i];
+      Serial.print(' ');
+      if (value >= 0x20 && value <= 0x7F) {  // ASCII range
+        Serial.print(value);
+      } else {
+        Serial.print(' ');  // replacement character
+      }
+    }
+    Serial.println();
   }
-  Serial.println();
 #endif  // GCN_DEBUG_MQTT_SUBSCRIBE
-
   main_state_machine.mqtt_callback(topic_utf8, payload, length);
 }
 
 void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned int length) {
   String topic(topic_utf8);
+
+#ifdef GCN_COMMAND_SYNCHRONIZE_SNTP
+  if (topic == mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_SYNCHRONIZE_SNTP)) {
+    print_millis();
+    Serial.println("Received 'synchronize SNTP' command");
+    sntp_resynchronize();
+    return;
+  }
+#endif  // GCN_COMMAND_SYNCHRONIZE_SNTP
+
+#ifdef GCN_COMMAND_DISCONNECT_MQTT
   if (topic == mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_MQTT)) {
     print_millis();
     Serial.println("Received 'disconnect MQTT' command");
     mqtt_client.disconnect();
-    set_state(MAIN_STATE_WIFI_CONNECTED);
+    set_state(MAIN_STATE_SNTP_CONNECTED);
     return;
   }
+#endif  // GCN_COMMAND_DISCONNECT_MQTT
+
+#ifdef GCN_COMMAND_DISCONNECT_WIFI
   if (topic == mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_WIFI)) {
     print_millis();
     Serial.println("Received 'disconnect wifi' command");
@@ -43,6 +58,9 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
     set_state(MAIN_STATE_WIFI_NOT_CONNECTED);
     return;
   }
+#endif  // GCN_COMMAND_DISCONNECT_WIFI
+
+#ifdef GCN_COMMAND_REBOOT
   if (topic == mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_REBOOT)) {
     print_millis();
     Serial.println("Received 'reboot' command");
@@ -51,8 +69,10 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
     set_state(MAIN_STATE_REBOOT);
     return;
   }
+#endif  // GCN_COMMAND_REBOOT
+
   print_millis();
-  Serial.print("Unhandled MQTT input topic");
+  Serial.print("Ignoring unknown MQTT input topic");
   Serial.println(topic_utf8);
 }
 
@@ -117,19 +137,14 @@ bool MainStateMachine::mqtt_publish_topic_string(const String &topic_utf8, const
 
 bool MainStateMachine::mqtt_subscribe_topic(const String &topic_utf8, int qos) {
   const char *topic = topic_utf8.c_str();
-#ifdef GCN_DEBUG_MQTT_SUBSCRIBE
+  bool result = mqtt_client.subscribe(topic, qos);
   print_millis();
   Serial.print("MQTT subscribing to ");
   Serial.print(topic);
   Serial.print(" qos ");
-  Serial.println(qos);
-#endif  // GCN_DEBUG_MQTT_PUBLISH
-  bool result = mqtt_client.subscribe(topic, qos);
-#ifdef GCN_DEBUG_MQTT_SUBSCRIBE
-  print_millis();
-  Serial.print("MQTT subscribe ");
+  Serial.print(qos);
+  Serial.print(" result ");
   Serial.println(result ? "OK" : "FAIL");
-#endif  // GCN_DEBUG_MQTT_PUBLISH
   return result;
 }
 
@@ -137,8 +152,9 @@ void MainStateMachine::state_mqtt_connected_enter() {
   light_state_machine.permanent_on();
   print_millis();
   Serial.print("MQTT connection established in ");
-  Serial.print(millis() - last_mqtt_begin);
+  Serial.print(millis() - last_mqtt_begin_ms);
   Serial.println(" ms");
+  mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_SYNCHRONIZE_SNTP), 1);
   mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_MQTT), 1);
   mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_WIFI), 1);
   mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_REBOOT), 1);
