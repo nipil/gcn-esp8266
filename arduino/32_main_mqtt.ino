@@ -2,6 +2,7 @@
 
 void main_state_machine_mqtt_callback(char *topic_utf8, byte *payload, unsigned int length) {
 #ifdef GCN_DEBUG_MQTT_SUBSCRIBE
+  print_millis();
   Serial.print("MQTT recv ");
   Serial.print(length);
   Serial.print(" bytes topic ");
@@ -21,18 +22,49 @@ void main_state_machine_mqtt_callback(char *topic_utf8, byte *payload, unsigned 
   }
   Serial.println();
 #endif  // GCN_DEBUG_MQTT_SUBSCRIBE
+
   main_state_machine.mqtt_callback(topic_utf8, payload, length);
 }
 
 void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned int length) {
-  // TODO
+  String topic(topic_utf8);
+  if (topic == mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_MQTT)) {
+    print_millis();
+    Serial.println("Received 'disconnect MQTT' command");
+    mqtt_client.disconnect();
+    set_state(MAIN_STATE_WIFI_CONNECTED);
+    return;
+  }
+  if (topic == mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_WIFI)) {
+    print_millis();
+    Serial.println("Received 'disconnect wifi' command");
+    mqtt_client.disconnect();
+    WiFi.disconnect();
+    set_state(MAIN_STATE_WIFI_NOT_CONNECTED);
+    return;
+  }
+  if (topic == mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_REBOOT)) {
+    print_millis();
+    Serial.println("Received 'reboot' command");
+    mqtt_client.disconnect();
+    WiFi.disconnect();
+    set_state(MAIN_STATE_REBOOT);
+    return;
+  }
+  print_millis();
+  Serial.print("Unhandled MQTT input topic");
+  Serial.println(topic_utf8);
 }
 
-String MainStateMachine::get_will_topic_utf8() {
-  return String(GCN_MQTT_BROKER_APP_TOPIC) + String("/") + String(WiFi.macAddress()) + String("/") + String(GCN_MQTT_BROKER_WILL_SUBTOPIC);
+String mqtt_get_sub_topic_utf8(const char *topic_direction, const char *sub_topic) {
+  return String(GCN_MQTT_BROKER_APP_TOPIC) + String("/") + String(WiFi.macAddress()) + String("/") + String(topic_direction) + String("/") + String(sub_topic);
 }
 
-String MainStateMachine::get_client_id_utf8() {
+String MainStateMachine::mqtt_get_will_topic_utf8() {
+  return mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_OUT_TOPIC, GCN_MQTT_BROKER_WILL_TOPIC);
+}
+
+String MainStateMachine::mqtt_get_client_id_utf8() {
   String mac = String(WiFi.macAddress());
   std::replace(mac.begin(), mac.end(), ':', '_');
   return String(GCN_MQTT_BROKER_APP_TOPIC) + String("-") + mac;
@@ -53,24 +85,24 @@ bool MainStateMachine::is_mqtt_connected() {
   bool connected = mqtt_client.connected();
 #ifdef GCN_DEBUG_MQTT_STATUS_CHANGES
   int state = mqtt_client.state();
-  if (mqtt_connected_last_value != connected || mqtt_connected_last_state != state) {
-    mqtt_connected_last_value = connected;
-    mqtt_connected_last_state = state;
+  if (last_mqtt_connected != connected || last_mqtt_state != state) {
+    last_mqtt_connected = connected;
+    last_mqtt_state = state;
+    print_millis();
     Serial.print("MQTT change : connected ");
     Serial.print(connected ? "YES" : "NO");
     Serial.print(" state ");
     Serial.print(state);
-    Serial.print(" at ");
-    Serial.print(millis());
-    Serial.println(" ms");
+    Serial.println();
   }
 #endif  // GCN_DEBUG_MQTT_STATUS_CHANGES
   return connected;
 }
 
-bool MainStateMachine::publish_string(const String &topic_utf8, const String &message, bool retain) {
+bool MainStateMachine::mqtt_publish_topic_string(const String &topic_utf8, const String &message, bool retain) {
   bool result = mqtt_client.publish(topic_utf8.c_str(), message.c_str(), retain);
 #ifdef GCN_DEBUG_MQTT_PUBLISH
+  print_millis();
   Serial.print("MQTT publish ");
   Serial.print(result ? "OK" : "FAIL");
   Serial.print(" retain ");
@@ -83,24 +115,36 @@ bool MainStateMachine::publish_string(const String &topic_utf8, const String &me
   return result;
 }
 
+bool MainStateMachine::mqtt_subscribe_topic(const String &topic_utf8, int qos) {
+  const char *topic = topic_utf8.c_str();
+#ifdef GCN_DEBUG_MQTT_SUBSCRIBE
+  print_millis();
+  Serial.print("MQTT subscribing to ");
+  Serial.print(topic);
+  Serial.print(" qos ");
+  Serial.println(qos);
+#endif  // GCN_DEBUG_MQTT_PUBLISH
+  bool result = mqtt_client.subscribe(topic, qos);
+#ifdef GCN_DEBUG_MQTT_SUBSCRIBE
+  print_millis();
+  Serial.print("MQTT subscribe ");
+  Serial.println(result ? "OK" : "FAIL");
+#endif  // GCN_DEBUG_MQTT_PUBLISH
+  return result;
+}
+
 void MainStateMachine::state_mqtt_connected_enter() {
   light_state_machine.permanent_on();
+  print_millis();
   Serial.print("MQTT connection established in ");
-  Serial.print(millis() - mqtt_connecting_start_millis);
+  Serial.print(millis() - last_mqtt_begin);
   Serial.println(" ms");
-
-  mqtt_last_status_display = millis();
-
-  // TODO: subscribe to gcn/%u/in/command
+  mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_MQTT), 1);
+  mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_WIFI), 1);
+  mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_REBOOT), 1);
 }
 
 void MainStateMachine::state_mqtt_connected_task() {
-  if (millis() - mqtt_last_status_display > GCN_MQTT_STATUS_INTERVAL_MS) {
-    mqtt_last_status_display = millis();
-    Serial.print("MQTT connection active for ");
-    Serial.print((millis() - mqtt_connecting_start_millis) / 1000UL);
-    Serial.println(" secs");
-  }
 
   // TODO: read initial input states
   // TODO: read current input stats

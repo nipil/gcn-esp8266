@@ -2,7 +2,7 @@
 
 MainStateMachine::MainStateMachine(PubSubClient &mqtt_client, LightStateMachine &light_state_machine)
   : mqtt_client(mqtt_client), light_state_machine(light_state_machine), main_state(MAIN_STATE_BOOT),
-    mqtt_client_id_utf8(get_client_id_utf8()), mqtt_will_topic_utf8(get_will_topic_utf8()) {
+    mqtt_client_id_utf8(mqtt_get_client_id_utf8()), mqtt_will_topic_utf8(mqtt_get_will_topic_utf8()) {
 }
 
 void MainStateMachine::run_enters() {
@@ -66,7 +66,10 @@ void MainStateMachine::run_tasks() {
 
 void MainStateMachine::set_state(const MainState new_state) {
 #ifdef GCN_DEBUG_MAIN_STATE_MACHINE
-  Serial.print("Switching main_state to ");
+  print_millis();
+  Serial.print("Switching main_state from ");
+  Serial.print(main_state);
+  Serial.print(" to ");
   Serial.println(new_state);
 #endif  // GCN_DEBUG_MAIN_STATE_MACHINE
   main_state = new_state;
@@ -74,21 +77,18 @@ void MainStateMachine::set_state(const MainState new_state) {
 }
 
 void MainStateMachine::state_error_enter() {
-  error_detected_millis = millis();
   light_state_machine.start(1);
-  Serial.print("Unrecoverable error state reached, rebooting in ");
-  Serial.print(GCN_ERROR_WAITING_BEFORE_REBOOT_MS);
-  Serial.println(" ms");
+  print_millis();
+  Serial.println("Unrecoverable error state reached");
 }
 
 void MainStateMachine::state_error_task() {
-  if (millis() - error_detected_millis > GCN_ERROR_WAITING_BEFORE_REBOOT_MS) {
-    set_state(MAIN_STATE_REBOOT);
-  }
+  set_state(MAIN_STATE_REBOOT);
 }
 
 void MainStateMachine::state_reboot_enter() {
-  Serial.print("Rebooting.");
+  print_millis();
+  Serial.println("Rebooting");
 }
 
 void MainStateMachine::state_reboot_task() {
@@ -96,20 +96,22 @@ void MainStateMachine::state_reboot_task() {
 }
 
 void MainStateMachine::state_boot_task() {
+  print_millis();
   Serial.print("MQTT client-id ");
-  Serial.print(mqtt_client_id_utf8.c_str());
+  Serial.println(mqtt_client_id_utf8.c_str());
   Serial.print("MQTT will topic ");
   Serial.print(mqtt_will_topic_utf8.c_str());
   Serial.print(" qos ");
   Serial.print(GCN_MQTT_BROKER_WILL_QOS);
   Serial.print(" retain ");
   Serial.print(GCN_MQTT_BROKER_WILL_RETAIN ? "yes" : "NO");
-  Serial.print(" message ");
+  Serial.print(" message=");
   Serial.println(GCN_MQTT_BROKER_WILL_MESSAGE);
   set_state(MAIN_STATE_WIFI_NOT_CONNECTED);
 }
 
 void MainStateMachine::state_default_enter() {
+  print_millis();
   Serial.print("Invalid main state ");
   Serial.println(main_state);
 }
@@ -130,19 +132,20 @@ void MainStateMachine::update() {
   // watchdogs
 #ifdef GCN_PERIODIC_REBOOT_AFTER_MS
   if (millis() > GCN_PERIODIC_REBOOT_AFTER_MS) {
-    Serial.print("Maximum running time reached ");
-    Serial.print(GCN_PERIODIC_REBOOT_AFTER_MS);
-    Serial.println(" ms");
+    print_millis();
+    Serial.println("Maximum running time reached");
     set_state(MAIN_STATE_REBOOT);
     return;
   }
 #endif  // GCN_PERIODIC_REBOOT_AFTER_MS
   if (!is_wifi_connected() && main_state >= MAIN_STATE_WIFI_CONNECTED) {
+    print_millis();
     Serial.println("Detected WiFi disconnection");
     set_state(MAIN_STATE_WIFI_NOT_CONNECTED);
     return;
   }
   if (!is_mqtt_connected() && main_state >= MAIN_STATE_MQTT_CONNECTED) {
+    print_millis();
     Serial.println("Detected MQTT disconnection");
     set_state(MAIN_STATE_WIFI_CONNECTED);
     return;

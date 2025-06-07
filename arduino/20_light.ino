@@ -8,13 +8,11 @@ LightStateMachine::LightStateMachine(ArduinoOutputPin &output_pin, const unsigne
 void LightStateMachine::set_state(const LightState new_state) {
   light_state = new_state;
   record_event_millis();
-#ifdef DEBUG_LIGHT_STATE_MACHINE
+#ifdef GCN_DEBUG_LIGHT_STATE_MACHINE
+  print_millis();
   Serial.print("Light new state ");
-  Serial.print(new_state);
-  Serial.print(" at ");
-  Serial.print(last_event_millis);
-  Serial.println(" ms");
-#endif  // DEBUG_LIGHT_STATE_MACHINE
+  Serial.println(new_state);
+#endif  // GCN_DEBUG_LIGHT_STATE_MACHINE
 }
 
 void LightStateMachine::record_event_millis() {
@@ -30,12 +28,10 @@ void LightStateMachine::setup() {
 }
 
 void LightStateMachine::permanent_on() {
+  print_millis();
+  Serial.println("Starting permanent light");
   output_pin.on();
   set_state(LIGHT_STATE_PERMANENT);
-#ifdef DEBUG_LIGHT_STATE_MACHINE
-  Serial.print("Starting permanent light at ");
-  Serial.println(last_event_millis);
-#endif  // DEBUG_LIGHT_STATE_MACHINE
 }
 
 void LightStateMachine::stop() {
@@ -44,23 +40,17 @@ void LightStateMachine::stop() {
 }
 
 void LightStateMachine::start(const int count) {
+  print_millis();
+  Serial.print("Setting light cycle to ");
+  Serial.print(count);
+  Serial.println(" counts");
   blink_count = count;
   blink_index = 0;
   if (blink_count > 0) {
     output_pin.on();
     set_state(LIGHT_STATE_ON);
-#ifdef DEBUG_LIGHT_STATE_MACHINE
-    Serial.print("Starting light cycle of ");
-    Serial.print(count);
-    Serial.print(" at ");
-    Serial.println(last_event_millis);
-#endif  // DEBUG_LIGHT_STATE_MACHINE
   } else {
     stop();
-#ifdef DEBUG_LIGHT_STATE_MACHINE
-    Serial.print("Stopping light cycle at ");
-    Serial.println(last_event_millis);
-#endif  // DEBUG_LIGHT_STATE_MACHINE
   }
 }
 
@@ -73,12 +63,13 @@ void LightStateMachine::update() {
         break;  // wait more
       }
       blink_index++;
-#ifdef DEBUG_LIGHT_STATE_MACHINE
+#ifdef GCN_DEBUG_LIGHT_STATE_MACHINE
+      print_millis();
       Serial.print("Light blink ");
       Serial.print(blink_index);
       Serial.print("/");
       Serial.println(blink_count);
-#endif  // DEBUG_LIGHT_STATE_MACHINE
+#endif  // GCN_DEBUG_LIGHT_STATE_MACHINE
       output_pin.off();
       set_state(LIGHT_STATE_OFF);
       break;
@@ -97,12 +88,18 @@ void LightStateMachine::update() {
       if (millis_since_last_event() < long_duration_ms) {
         break;  // wait more
       }
-      start(blink_count);  // restart
+#ifdef GCN_DEBUG_LIGHT_STATE_MACHINE
+      print_millis();
+      Serial.println("Light blink finished");
+#endif  // GCN_DEBUG_LIGHT_STATE_MACHINE
+      start(blink_count);
       break;
     case LIGHT_STATE_PERMANENT:
       break;  // stay
     default:
+      print_millis();
       Serial.print("Invalid light state ");
       Serial.println(light_state);
+      set_state(LIGHT_STATE_IDLE);
   }
 }

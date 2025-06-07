@@ -18,6 +18,7 @@
 #define GCN_MQTT_BROKER_TCP_PORT 1883
 #define GCN_MQTT_BROKER_USER_NAME_UTF8 NULL
 #define GCN_MQTT_BROKER_PASSWORD NULL
+#define GCN_MQTT_CLIENT_INSECURE false  // TODO: remove feature after debugging TLS verification and CA certs
 
 // Functional parameters
 #define GCN_STATUS_LED_PIN LED_BUILTIN
@@ -29,18 +30,16 @@
 #define GCN_SERIAL_BAUD 74880  // ESP8266 default baud rate on boot
 #define GCN_PERIODIC_REBOOT_AFTER_MS (24 * 60 * 60 * 1000)
 #define GCN_WIFI_WAITING_TIMEOUT_MS (10 * 1000)
-#define GCN_MQTT_WAITING_TIMEOUT_MS (10 * 1000)
-#define GCN_MQTT_CONNECT_RETRY_WAIT_MS (3 * 1000)
-#define GCN_ERROR_WAITING_BEFORE_REBOOT_MS (10 * 1000)
+#define GCN_MQTT_WAITING_TIMEOUT_MS (30 * 1000)
 #define GCN_LOOP_MIN_DELAY_MS 10
 #define GCN_LIGHT_SHORT_DURATION_MS 100
 #define GCN_LIGHT_LONG_DURATION_MS 1000
-#define GCN_MQTT_STATUS_INTERVAL_MS (60 * 1000)
-#define GCN_WIFI_STATUS_INTERVAL_MS (60 * 1000)
 
 // MQTT data
 #define GCN_MQTT_BROKER_APP_TOPIC "gcn"
-#define GCN_MQTT_BROKER_WILL_SUBTOPIC "out/status"
+#define GCN_MQTT_BROKER_IN_TOPIC "in"
+#define GCN_MQTT_BROKER_OUT_TOPIC "out"
+#define GCN_MQTT_BROKER_WILL_TOPIC "status"
 #define GCN_MQTT_BROKER_WILL_QOS 0
 #define GCN_MQTT_BROKER_WILL_RETAIN true
 #define GCN_MQTT_BROKER_WILL_MESSAGE "offline"
@@ -48,16 +47,21 @@
 #define GCN_MQTT_BROKER_CLEAN_SESSION true
 
 // Optional behaviours
-// #define GCN_DEBUG_LOOP_TIMING_WARN_MS 1000
+#define GCN_DEBUG_MAIN_STATE_MACHINE
+#define GCN_DEBUG_WIFI_STATUS_CHANGES
+#define GCN_DEBUG_MQTT_STATUS_CHANGES
+#define GCN_DEBUG_LIGHT_STATE_MACHINE
 // #define GCN_DEBUG_ARDUINO_OUTPUT_PIN
-// #define GCN_DEBUG_LIGHT_STATE_MACHINE
-// #define GCN_DEBUG_MAIN_STATE_MACHINE
-// #define GCN_DEBUG_WIFI_STATUS_CHANGES
-// #define GCN_DEBUG_MQTT_STATUS_CHANGES
 // #define GCN_DEBUG_MQTT_PUBLISH
 #define GCN_DEBUG_MQTT_SUBSCRIBE
 
-// Use dedicated header to re-#define after #undef
+// Input commands
+#define GCN_COMMAND_REBOOT "reboot"
+#define GCN_COMMAND_DISCONNECT_WIFI "disconnect_wifi"
+#define GCN_COMMAND_DISCONNECT_MQTT "disconnect_mqtt"
+
+// Use dedicated header to customize setting without modifying main code
+// You just have to #undef what you want to change, then #define it with the new value
 #if __has_include("override_defines.h")
 #include "override_defines.h"
 #endif
@@ -88,6 +92,7 @@ const int MONITOR_DIGITAL_PINS_COUNT = sizeof(MONITOR_DIGITAL_PINS) / sizeof(int
 // global functions
 void setup();
 void loop();
+void print_millis();
 void main_state_machine_mqtt_callback(char *topic, byte *payload, unsigned int length);
 
 class ArduinoOutputPin {
@@ -150,11 +155,12 @@ private:
     MAIN_STATE_WIFI_NOT_CONNECTED = 10,
     MAIN_STATE_WIFI_TRY_CONFIG = 11,
     MAIN_STATE_WIFI_CONNECTED = 12,
-    MAIN_STATE_MQTT_CONNECTED = 20,
+    MAIN_STATE_NTP_CONNECTED = 20,
+    MAIN_STATE_MQTT_CONNECTED = 30,
   } MainState;
 
-  const String mqtt_will_topic_utf8 = get_will_topic_utf8();
-  const String mqtt_client_id_utf8 = get_client_id_utf8();
+  const String mqtt_will_topic_utf8 = mqtt_get_will_topic_utf8();
+  const String mqtt_client_id_utf8 = mqtt_get_client_id_utf8();
 
   int wifi_credentials_index;
   WiFiClientSecure wifi_client_secure;
@@ -162,21 +168,18 @@ private:
   LightStateMachine &light_state_machine;
   MainState main_state;
 
-  unsigned long error_detected_millis;
-  unsigned long wifi_connecting_start_millis;
-  unsigned long wifi_last_status_display;
-  unsigned long mqtt_connecting_start_millis;
-  unsigned long mqtt_connecting_next_millis;
-  unsigned long mqtt_last_status_display;
+  unsigned long last_wifi_begin;
+  IPAddress last_wifi_address;
+  unsigned long last_mqtt_begin;
 
 #ifdef GCN_DEBUG_WIFI_STATUS_CHANGES
-  wl_status_t wifi_connected_last_status = WL_NO_SHIELD;
+  wl_status_t last_wifi_status = WL_NO_SHIELD;
   void print_wifi_status_value_name(wl_status_t status);
 #endif  // GCN_DEBUG_WIFI_STATUS_CHANGES
 
 #ifdef GCN_DEBUG_MQTT_STATUS_CHANGES
-  int mqtt_connected_last_state = -1;
-  bool mqtt_connected_last_value = false;
+  int last_mqtt_state = -1;
+  bool last_mqtt_connected = false;
 #endif  //GCN_DEBUG_MQTT_STATUS_CHANGES
 
   void set_state(const MainState new_state);
@@ -199,9 +202,12 @@ private:
   void state_default_task();
   bool is_wifi_connected();
   bool is_mqtt_connected();
-  bool publish_string(const String &topic, const String &message, bool retain);
-  String get_will_topic_utf8();
-  String get_client_id_utf8();
+  bool mqtt_publish_topic_string(const String &topic, const String &message, bool retain);
+  bool mqtt_subscribe_topic(const String &topic_utf8, int qos);
+  String mqtt_get_client_id_utf8();
+  String mqtt_get_in_sub_topic_utf8(char *sub_topic);
+  String mqtt_get_out_sub_topic_utf8(char *sub_topic);
+  String mqtt_get_will_topic_utf8();
 };
 
 // Dependency injection

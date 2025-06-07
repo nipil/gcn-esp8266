@@ -5,6 +5,7 @@ ArduinoOutputPin::ArduinoOutputPin(const int pin, const bool invert_output)
 }
 
 void ArduinoOutputPin::setup() {
+  print_millis();
   Serial.print("Using digital pin ");
   Serial.print(pin_number);
   Serial.print(" to drive the ");
@@ -15,10 +16,9 @@ void ArduinoOutputPin::setup() {
 
 void ArduinoOutputPin::on() {
 #ifdef GCN_DEBUG_ARDUINO_OUTPUT_PIN
+  print_millis();
   Serial.print("Turning on ");
-  if (invert) {
-    Serial.print("inverted ");
-  }
+  Serial.print(invert ? "inverted" : "non-inverted");
   Serial.println(pin_number);
 #endif  // GCN_DEBUG_ARDUINO_OUTPUT_PIN
   if (invert) {
@@ -30,10 +30,9 @@ void ArduinoOutputPin::on() {
 
 void ArduinoOutputPin::off() {
 #ifdef GCN_DEBUG_ARDUINO_OUTPUT_PIN
+  print_millis();
   Serial.print("Turning off ");
-  if (invert) {
-    Serial.print("inverted ");
-  }
+  Serial.print(invert ? "inverted" : "non-inverted");
   Serial.println(pin_number);
 #endif  // GCN_DEBUG_ARDUINO_OUTPUT_PIN
   if (invert) {
