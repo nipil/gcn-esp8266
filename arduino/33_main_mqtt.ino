@@ -1,6 +1,10 @@
 // GPIO CHANGE NOTIFIER (C) NIPIL 2025+
 
 void main_state_machine_mqtt_callback(char *topic_utf8, byte *payload, unsigned int length) {
+  main_state_machine.mqtt_callback(topic_utf8, payload, length);
+}
+
+void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned int length) {
 #ifdef GCN_DEBUG_MQTT_SUBSCRIBE
   print_millis();
   Serial.print("MQTT recv ");
@@ -24,10 +28,7 @@ void main_state_machine_mqtt_callback(char *topic_utf8, byte *payload, unsigned 
     Serial.println();
   }
 #endif  // GCN_DEBUG_MQTT_SUBSCRIBE
-  main_state_machine.mqtt_callback(topic_utf8, payload, length);
-}
 
-void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned int length) {
   String topic(topic_utf8);
 
 #ifdef GCN_COMMAND_SYNCHRONIZE_SNTP
@@ -158,13 +159,18 @@ void MainStateMachine::state_mqtt_connected_enter() {
   mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_MQTT), 1);
   mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_WIFI), 1);
   mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_REBOOT), 1);
+
+  // TODO: publish metadata (manufacturer, chip, max_ram, freq, etc) as an exercise
 }
 
 void MainStateMachine::state_mqtt_connected_task() {
+  // int value = digitalRead(GCN_MONITORED_DIGITAL_PIN_A);
+  // Serial.print("pin ");
+  // Serial.print(GCN_MONITORED_DIGITAL_PIN_A);
+  // Serial.print(" value ");
+  // Serial.println(value);
+  // delay(1000);
+  // TODO: publish uptime, wifi uptime, mqtt uptime, sntp timestamp, ... periodically
 
-  // TODO: read initial input states
-  // TODO: read current input stats
-  // TODO: compute changes
-  // TODO: store current as initial
   // TODO: publish changes in topics gcn/%u/out/pins/i with retain ?
 }

@@ -178,13 +178,15 @@ void MainStateMachine::state_wifi_connected_task() {
     return;
   }
 
-  print_millis();
-  Serial.print("Synchronized with SNTP ");
+  char fmt_buf[sizeof("2025-06-08T09:29:58+0200")];  // use an example to ensure actual size including null terminating byte
   time_t now = time(nullptr);
   struct tm timeinfo;
-  gmtime_r(&now, &timeinfo);
-  Serial.print("Current time: ");
-  Serial.print(asctime(&timeinfo));
-
+  localtime_r(&now, &timeinfo);
+  strftime(fmt_buf, sizeof(fmt_buf), "%FT%T%z", &timeinfo);
+  print_millis();
+  Serial.print("Synchronized with SNTP unix timestamp=");
+  Serial.print(now);
+  Serial.print(" local_time_iso=");
+  Serial.println(fmt_buf);
   set_state(MAIN_STATE_SNTP_CONNECTED);
 }

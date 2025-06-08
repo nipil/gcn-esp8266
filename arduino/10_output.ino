@@ -6,7 +6,7 @@ ArduinoOutputPin::ArduinoOutputPin(const int pin, const bool invert_output)
 
 void ArduinoOutputPin::setup() {
   print_millis();
-  Serial.print("Using digital pin ");
+  Serial.print("Using digital pin number=");
   Serial.print(pin_number);
   Serial.print(" to drive the ");
   Serial.print(invert ? "inverted" : "non-inverted");

@@ -1,5 +1,4 @@
-#ifndef TRUSTED_CA_CERTS_H
-#define TRUSTED_CA_CERTS_H
+// GPIO CHANGE NOTIFIER (C) NIPIL 2025+
 
 // See https://letsencrypt.org/certificates/
 
@@ -64,4 +63,14 @@ tL4ndQavEi51mI38AjEAi/V3bNTIZargCyzuFJ0nN6T5U6VR5CmD1/iQMVtCnwr1
 -----END CERTIFICATE-----
 )CERT";
 
-#endif  // TRUSTED_CA_CERTS_H
+void setup_ca_certificates() {
+  print_millis();
+  Serial.print("Loading CA Certificate into BearSSL: ");
+  Serial.println(ca_cert_pem_1);
+  ca_certs.append(ca_cert_pem_1);
+  Serial.print("Loading CA Certificate into BearSSL: ");
+  Serial.println(ca_cert_pem_2);
+  ca_certs.append(ca_cert_pem_2);
+  wifi_client.setTrustAnchors(&ca_certs);
+  wifi_client.setSSLVersion(GCN_SSL_VERSION_MIN, GCN_SSL_VERSION_MAX);
+}

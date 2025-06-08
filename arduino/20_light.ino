@@ -46,6 +46,7 @@ void LightStateMachine::start(const int count) {
   Serial.println(" counts");
   blink_count = count;
   blink_index = 0;
+  record_event_millis();
   if (blink_count > 0) {
     output_pin.on();
     set_state(LIGHT_STATE_ON);
