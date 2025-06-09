@@ -8,6 +8,9 @@ Features :
   - multiple hardcoded wifi credentials
   - periodic hardcoded reboots to reinitialize
 
+- network time synchronization via SNTP at boot
+  - optional periodic resynchronization
+
 - multiple digital pin monitor
   - input de-bouncing
   - recording upon change interrupt (one per pin)
@@ -22,7 +25,7 @@ Features :
   - only LetsEncrypt CA certificates are included, for use with publicly reachable servers
   - fast TLS session resumtion for faster reconnection upon deconnection (but not through sleep/reboots)
 
-- limited remote control capabilities
+- Optional remote control capabilities
   - resynchronize time from network
   - disconnect from mqtt
   - disconnect from wifi

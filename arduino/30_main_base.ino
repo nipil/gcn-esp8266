@@ -124,6 +124,13 @@ void MainStateMachine::update() {
     mqtt_client.loop();
   }
 
+  // Periodic tasks
+#ifdef GCN_SNTP_RESYNCHRONIZE_INTERVAL_MINUTE
+  if (millis() - last_sntp_begin_ms > GCN_SNTP_RESYNCHRONIZE_INTERVAL_MINUTE * 60 * 1000 && main_state >= MAIN_STATE_WIFI_CONNECTED) {
+    sntp_synchronize();
+  }
+#endif  // GCN_SNTP_RESYNCHRONIZE_INTERVAL_MINUTE
+
   // watchdogs
 #ifdef GCN_PERIODIC_REBOOT_AFTER_MS
   if (millis() > GCN_PERIODIC_REBOOT_AFTER_MS) {

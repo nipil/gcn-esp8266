@@ -5,9 +5,10 @@ bool MainStateMachine::is_sntp_connected() {
   return now > 1700000000;  // nov 2023, but any recent epoch would work !
 }
 
-void MainStateMachine::sntp_resynchronize() {
+void MainStateMachine::sntp_synchronize() {
+  last_sntp_begin_ms = millis();
   print_millis();
-  Serial.println("Triggering SNTP resynchronization");
+  Serial.println("Triggering SNTP synchronization");
   sntp_stop();
   sntp_init();
 }

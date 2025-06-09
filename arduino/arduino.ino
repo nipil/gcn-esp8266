@@ -64,6 +64,7 @@
 #define GCN_SNTP_SERVER1 "fr.pool.ntp.org"
 #define GCN_SNTP_SERVER2 "ntp.ripe.net"
 #define GCN_SNTP_SERVER3 "time.apple.com"
+#define GCN_SNTP_RESYNCHRONIZE_INTERVAL_MINUTE 30
 
 // MQTT data
 #define GCN_MQTT_BROKER_APP_TOPIC "gcn"

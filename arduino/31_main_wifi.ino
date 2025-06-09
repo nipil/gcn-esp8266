@@ -140,7 +140,7 @@ void MainStateMachine::state_wifi_try_config_task() {
 void MainStateMachine::state_wifi_connected_enter() {
   last_sntp_begin_ms = millis();
   print_millis();
-  Serial.println("Trying to synchronize time via SNTP");
+  Serial.println("Configuring time synchronization via SNTP");
   configTime(
     GCN_SNTP_TIMEZONE,
 #ifdef GCN_SNTP_SERVER1

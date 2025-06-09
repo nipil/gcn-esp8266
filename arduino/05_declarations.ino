@@ -139,7 +139,7 @@ private:
   bool is_wifi_connected();
   bool is_sntp_connected();
   bool is_mqtt_connected();
-  void sntp_resynchronize();
+  void sntp_synchronize();
   bool mqtt_publish_topic_string(const String &topic, const String &message, bool retain);
   bool mqtt_subscribe_topic(const String &topic_utf8, int qos);
   String mqtt_get_client_id_utf8();

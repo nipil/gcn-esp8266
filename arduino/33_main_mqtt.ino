@@ -35,7 +35,7 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
   if (topic == mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_SYNCHRONIZE_SNTP)) {
     print_millis();
     Serial.println("Received 'synchronize SNTP' command");
-    sntp_resynchronize();
+    sntp_synchronize();
     return;
   }
 #endif  // GCN_COMMAND_SYNCHRONIZE_SNTP
@@ -155,10 +155,22 @@ void MainStateMachine::state_mqtt_connected_enter() {
   Serial.print("MQTT connection established in ");
   Serial.print(millis() - last_mqtt_begin_ms);
   Serial.println(" ms");
+
+#ifdef GCN_COMMAND_SYNCHRONIZE_SNTP
   mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_SYNCHRONIZE_SNTP), 1);
+#endif  // GCN_COMMAND_SYNCHRONIZE_SNTP
+
+#ifdef GCN_COMMAND_DISCONNECT_MQTT
   mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_MQTT), 1);
+#endif  // GCN_COMMAND_DISCONNECT_MQTT
+
+#ifdef GCN_COMMAND_DISCONNECT_WIFI
   mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_WIFI), 1);
+#endif  // GCN_COMMAND_DISCONNECT_WIFI
+
+#ifdef GCN_COMMAND_REBOOT
   mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_REBOOT), 1);
+#endif  // GCN_COMMAND_REBOOT
 
   // TODO: publish metadata (manufacturer, chip, max_ram, freq, etc) as an exercise
 }
