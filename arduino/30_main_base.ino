@@ -102,18 +102,6 @@ void MainStateMachine::state_reboot_task() {
 }
 
 void MainStateMachine::state_boot_task() {
-  print_millis();
-  Serial.print("MQTT client-id ");
-  Serial.println(mqtt_client_id_utf8.c_str());
-  print_millis();
-  Serial.print("MQTT will topic ");
-  Serial.print(mqtt_will_topic_utf8.c_str());
-  Serial.print(" qos ");
-  Serial.print(GCN_MQTT_BROKER_WILL_QOS);
-  Serial.print(" retain ");
-  Serial.print(GCN_MQTT_BROKER_WILL_RETAIN ? "yes" : "NO");
-  Serial.print(" message=");
-  Serial.println(GCN_MQTT_BROKER_WILL_MESSAGE);
   set_state(MAIN_STATE_WIFI_NOT_CONNECTED);
 }
 
@@ -157,4 +145,20 @@ void MainStateMachine::update() {
     set_state(MAIN_STATE_WIFI_CONNECTED);
     return;
   }
+}
+
+void MainStateMachine::setup() {
+  light_state_machine.setup();
+  print_millis();
+  Serial.print("MQTT client-id ");
+  Serial.println(mqtt_client_id_utf8.c_str());
+  print_millis();
+  Serial.print("MQTT will topic ");
+  Serial.print(mqtt_will_topic_utf8.c_str());
+  Serial.print(" qos ");
+  Serial.print(GCN_MQTT_BROKER_WILL_QOS);
+  Serial.print(" retain ");
+  Serial.print(GCN_MQTT_BROKER_WILL_RETAIN ? "yes" : "NO");
+  Serial.print(" message=");
+  Serial.println(GCN_MQTT_BROKER_WILL_MESSAGE);
 }

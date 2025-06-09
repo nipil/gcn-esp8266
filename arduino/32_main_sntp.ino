@@ -30,7 +30,7 @@ void MainStateMachine::state_sntp_connected_task() {
   }
 
   if (millis() < next_mqtt_retry_ms) {
-    return; // wait more
+    return;  // wait more
   };
 
   bool success = mqtt_client.connect(
@@ -56,4 +56,25 @@ void MainStateMachine::state_sntp_connected_task() {
   }
 
   set_state(MAIN_STATE_MQTT_CONNECTED);
+}
+
+void setup_sntp() {
+  print_millis();
+  Serial.print("Will use SNTP timezone definition ");
+  Serial.println(GCN_SNTP_TIMEZONE);
+#ifdef GCN_SNTP_SERVER1
+  print_millis();
+  Serial.print("Will use SNTP server ");
+  Serial.println(GCN_SNTP_SERVER1);
+#endif  // GCN_SNTP_SERVER1
+#ifdef GCN_SNTP_SERVER2
+  print_millis();
+  Serial.print("Will use SNTP server ");
+  Serial.println(GCN_SNTP_SERVER2);
+#endif  // GCN_SNTP_SERVER2
+#ifdef GCN_SNTP_SERVER3
+  print_millis();
+  Serial.print("Will use SNTP server ");
+  Serial.println(GCN_SNTP_SERVER3);
+#endif  // GCN_SNTP_SERVER3
 }

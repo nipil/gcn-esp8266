@@ -75,6 +75,7 @@ class MainStateMachine {
 
 public:
   MainStateMachine(PubSubClient &mqtt_client, LightStateMachine &light_state_machine);
+  void setup();
   void update();
   void mqtt_callback(char *topic, byte *payload, unsigned int length);
 
@@ -180,12 +181,15 @@ private:
 // Dependency injection
 
 #if GCN_MQTT_BROKER_IS_SECURE
-X509List ca_certs;
+BearSSL::X509List ca_certs;
+BearSSL::Session tls_session;
 WiFiClientSecure wifi_client;
 #else
 WiFiClient wifi_client;
 #endif
 PubSubClient mqtt_client(GCN_MQTT_BROKER_DNS_NAME, GCN_MQTT_BROKER_TCP_PORT, main_state_machine_mqtt_callback, wifi_client);
+
 ArduinoOutputPin status_pin(GCN_STATUS_LED_PIN, GCN_STATUS_LED_INVERT);
 LightStateMachine light_state_machine(status_pin, GCN_LIGHT_SHORT_DURATION_MS, GCN_LIGHT_LONG_DURATION_MS);
+
 MainStateMachine main_state_machine(mqtt_client, light_state_machine);

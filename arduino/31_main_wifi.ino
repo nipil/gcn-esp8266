@@ -103,7 +103,7 @@ void MainStateMachine::state_wifi_try_config_enter() {
   Serial.print(wifi_credentials_index);
   Serial.print(" with SSID ");
   Serial.print(credential->ssid);
-  Serial.print(" and password");
+  Serial.print(" and password ");
   Serial.println(credential->password);
 #ifdef GCN_DEBUG_WIFI_STATUS_CHANGES
   last_wifi_status = WiFi.status();
@@ -189,4 +189,19 @@ void MainStateMachine::state_wifi_connected_task() {
   Serial.print(" local_time_iso=");
   Serial.println(fmt_buf);
   set_state(MAIN_STATE_SNTP_CONNECTED);
+}
+
+void setup_wifi() {
+  print_millis();
+  Serial.print("WiFi MAC address is ");
+  Serial.println(WiFi.macAddress());
+  for (int i = 0; i < WIFI_CREDENTIALS_COUNT; i++) {
+    print_millis();
+    Serial.print("WiFi credential ");
+    Serial.print(i);
+    Serial.print(" is for SSID ");
+    Serial.println(WIFI_CREDENTIALS[i].ssid);
+  }
+  WiFi.persistent(false);  // do not store wifi credentials in flash
+  WiFi.mode(WIFI_STA);
 }

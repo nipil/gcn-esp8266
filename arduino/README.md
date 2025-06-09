@@ -2,7 +2,36 @@
 
 Thanks to https://www.emqx.com/en/blog/esp8266-connects-to-the-public-mqtt-broker for the tutorial.
 
-IMPORTANT : only LetsEncrypt CA certificates are included for secure (verified) TLS.
+Features :
+
+- no write to flash, ever, for durability
+  - multiple hardcoded wifi credentials
+  - periodic hardcoded reboots to reinitialize
+
+- multiple digital pin monitor
+  - input de-bouncing
+  - recording upon change interrupt (one per pin)
+  - sample recorded in circular buffer of configurable (hardocded) size
+  - for seldom changing inputs, works to to cope with temporary "offline periods"
+
+- Optional TLS to the MQTT broker
+  - always-on verification of the TLS communication
+  - no "disable verification" option
+  - restricted to TLS 1.2, and optionnal hardening of TLS ciphers
+  - authentication via username/password, no need for client certificate
+  - only LetsEncrypt CA certificates are included, for use with publicly reachable servers
+  - fast TLS session resumtion for faster reconnection upon deconnection (but not through sleep/reboots)
+
+- limited remote control capabilities
+  - resynchronize time from network
+  - disconnect from mqtt
+  - disconnect from wifi
+  - reboot
+
+- auxiliary functions
+  - blinking led for status and mode
+  - fully informative serial output
+  - compile-time configurable debugging output
 
 ## Board setup
 
@@ -37,7 +66,3 @@ IMPORTANT : only LetsEncrypt CA certificates are included for secure (verified) 
 - Tools / Manage libraries
   - `PubSubClient` by Nick O'Leary (version 2.8.0 as of this writing)
     - Documentation : http://pubsubclient.knolleary.net/
-
-## How it works
-
-- tries to connect to different Wifi access point

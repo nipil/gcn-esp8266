@@ -1,5 +1,7 @@
 // GPIO CHANGE NOTIFIER (C) NIPIL 2025+
 
+#if GCN_MQTT_BROKER_IS_SECURE
+
 // See https://letsencrypt.org/certificates/
 
 // https://letsencrypt.org/certs/isrgrootx1.pem
@@ -63,14 +65,43 @@ tL4ndQavEi51mI38AjEAi/V3bNTIZargCyzuFJ0nN6T5U6VR5CmD1/iQMVtCnwr1
 -----END CERTIFICATE-----
 )CERT";
 
-void setup_ca_certificates() {
+
+#if GCN_TLS_CIPHERS_HARDEN
+// https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266WiFi/src/WiFiClientSecureBearSSL.cpp
+// expugne anything that is not the best (RSA, AES CBC, Non elliptic curves...)
+static const uint16_t reduced_cipher_suite[] = {
+  BR_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+  BR_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+  BR_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+};
+#endif  // GCN_TLS_CIPHERS_HARDEN
+
+void setup_tls() {
   print_millis();
   Serial.print("Loading CA Certificate into BearSSL: ");
   Serial.println(ca_cert_pem_1);
   ca_certs.append(ca_cert_pem_1);
+
+  print_millis();
   Serial.print("Loading CA Certificate into BearSSL: ");
   Serial.println(ca_cert_pem_2);
   ca_certs.append(ca_cert_pem_2);
+
   wifi_client.setTrustAnchors(&ca_certs);
-  wifi_client.setSSLVersion(GCN_SSL_VERSION_MIN, GCN_SSL_VERSION_MAX);
+
+  print_millis();
+  Serial.println("Enabling TLS session resumption");
+  wifi_client.setSession(&tls_session);  // buffer for TLS session resume (~200ms instead of ~3000ms on connect)
+
+#if GCN_TLS_CIPHERS_HARDEN
+  print_millis();
+  Serial.println("Restricting to hardened TLS ciphers");
+  wifi_client.setCiphers(reduced_cipher_suite, sizeof(reduced_cipher_suite) / sizeof(uint16_t));
+#endif  // GCN_TLS_CIPHERS_HARDEN
+
+  print_millis();
+  Serial.print("Allowing TLS version from ");
+  wifi_client.setSSLVersion(GCN_TLS_VERSION_MIN, GCN_TLS_VERSION_MAX);
 }
+
+#endif  // GCN_MQTT_BROKER_IS_SECURE

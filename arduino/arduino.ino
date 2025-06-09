@@ -77,8 +77,9 @@
 #define GCN_MQTT_BROKER_CLEAN_SESSION true
 
 // TLS security
-#define GCN_SSL_VERSION_MIN BR_TLS12  // Arduino/tools/sdk/include/bearssl/bearssl_ssl.h
-#define GCN_SSL_VERSION_MAX BR_TLS12  // no support yet for TLS 1.3 in BearSSL
+#define GCN_TLS_VERSION_MIN BR_TLS12  // Arduino/tools/sdk/include/bearssl/bearssl_ssl.h
+#define GCN_TLS_VERSION_MAX BR_TLS12  // no support yet for TLS 1.3 in BearSSL
+#define GCN_TLS_CIPHERS_HARDEN false  // WARNING: test thouroughly against your servers
 
 // Optional behaviours
 // #define GCN_DEBUG_WIFI_STATUS_CHANGES
@@ -86,7 +87,8 @@
 // #define GCN_DEBUG_MAIN_STATE_MACHINE
 // #define GCN_DEBUG_LIGHT_STATE_MACHINE
 // #define GCN_DEBUG_ARDUINO_OUTPUT_PIN
-#define GCN_DEBUG_MONITOR_RECORD
+// #define GCN_DEBUG_MONITOR_RECORD
+#define GCN_DEBUG_MONITOR_POP
 // #define GCN_DEBUG_MQTT_PUBLISH
 // #define GCN_DEBUG_MQTT_SUBSCRIBE
 

@@ -174,3 +174,14 @@ void MainStateMachine::state_mqtt_connected_task() {
 
   // TODO: publish changes in topics gcn/%u/out/pins/i with retain ?
 }
+
+void setup_mqtt() {
+  print_millis();
+  Serial.print("Connection to MQTT server will be ");
+  Serial.println(GCN_MQTT_BROKER_IS_SECURE ? "secured by SSL/TLS" : "in clear text (insecure)");
+  print_millis();
+  Serial.print("Will use MQTT server ");
+  Serial.print(GCN_MQTT_BROKER_DNS_NAME);
+  Serial.print(" port ");
+  Serial.println(GCN_MQTT_BROKER_TCP_PORT);
+}
