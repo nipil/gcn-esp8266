@@ -56,7 +56,7 @@
 
 // TLS timings for mqtt_client.connect()
 // - each failed attempt blocks for about 16 seconds
-// - requires about 3 seconds when succeeding
+// - requires about 3 seconds the first time when succeeding
 #define GCN_MQTT_WAITING_TIMEOUT_MS (60 * 1000)
 
 // SNTP data
@@ -66,7 +66,7 @@
 #define GCN_SNTP_SERVER3 "time.apple.com"
 #define GCN_SNTP_RESYNCHRONIZE_INTERVAL_MINUTE 30
 
-// MQTT data
+// MQTT functional data
 #define GCN_MQTT_BROKER_APP_TOPIC "gcn"
 #define GCN_MQTT_BROKER_IN_TOPIC "in"
 #define GCN_MQTT_BROKER_OUT_TOPIC "out"
@@ -76,14 +76,63 @@
 #define GCN_MQTT_BROKER_WILL_MESSAGE "offline"
 #define GCN_MQTT_BROKER_BORN_MESSAGE "online"
 #define GCN_MQTT_BROKER_CLEAN_SESSION true
-#define GCN_MQTT_BROKER_GPIO_MESSAGE "gpio"
+#define GCN_MQTT_BROKER_GPIO_TOPIC "gpio"
+#define GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE 10
+
+// MQTT hardware data
+#define GCN_MQTT_BROKER_HW_TOPIC "hardware"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC "esp8266"
+#define GCN_MQTT_BROKER_HW_VALUE GCN_MQTT_BROKER_ESP8266_TOPIC
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_RESET_REASON "reset_reason"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_CHIP_ID "chip_id"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_CORE_VERSION "core_version"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_SDK_VERSION "sdk_version"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_CPU_FREQ_MHZ "cpu_freq_mhz"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_SKETCH_SIZE "sketch_size"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_FREE_SKETCH_SIZE "free_sketch_size"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_SKETCH_MD5 "sketch_md5"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_FLASH_CHIP_ID "flash_chip_id"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_FLASH_CHIP_SIZE "flash_chip_size"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_FLASH_CHIP_REAL_SIZE "flash_chip_real_size"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_FLASH_CHIP_SPEED_HZ "flash_chip_speed_hz"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_CHECK_FLASH_CRC "check_flash_crc"
+
+#ifdef GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE
+// MQTT periodic metrics
+#define GCN_MQTT_BROKER_MQTT_TOPIC "mqtt"
+#define GCN_MQTT_BROKER_MQTT_SENT_OK "sent_ok"
+#define GCN_MQTT_BROKER_MQTT_SENT_ERROR "sent_error"
+#define GCN_MQTT_BROKER_MQTT_SUBSCRIBE_OK "subscribe_ok"
+#define GCN_MQTT_BROKER_MQTT_SUBSCRIBE_ERROR "subscribe_error"
+#define GCN_MQTT_BROKER_MQTT_CONNECT_OK "connect_ok"
+#define GCN_MQTT_BROKER_MQTT_CONNECT_ERROR "connect_error"
+#define GCN_MQTT_BROKER_MQTT_RECEIVED "received"
+#define GCN_MQTT_BROKER_UPTIME_TOPIC "uptime"
+#define GCN_MQTT_BROKER_UPTIME_SYSTEM "system_ms"
+#define GCN_MQTT_BROKER_UPTIME_WIFI "wifi_ms"
+#define GCN_MQTT_BROKER_UPTIME_SNTP "sntp_ms"
+#define GCN_MQTT_BROKER_UPTIME_MQTT "mqtt_ms"
+#define GCN_MQTT_BROKER_UPTIME_TIMESTAMP "unix_timestamp"
+#define GCN_MQTT_BROKER_NETWORK_TOPIC "network"
+#define GCN_MQTT_BROKER_NETWORK_LOCAL_IP "local_ip"
+#define GCN_MQTT_BROKER_NETWORK_NETMASK "netmask"
+#define GCN_MQTT_BROKER_NETWORK_GATEWAY_IP "gateway_ip"
+#define GCN_MQTT_BROKER_NETWORK_DNS "dns"
+#define GCN_MQTT_BROKER_NETWORK_DNS_MAX 4
+#define GCN_MQTT_BROKER_NETWORK_SSID "ssid"
+#define GCN_MQTT_BROKER_NETWORK_BSSID "bssid"
+#define GCN_MQTT_BROKER_NETWORK_RSSI "rssi"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_FREE_HEAP "free_heap"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_HEAP_FRAGMENTATION_PERCENT "heap_fragmentation_percent"
+#define GCN_MQTT_BROKER_ESP8266_TOPIC_MAX_FREE_BLOCK_SIZE "max_free_block_size"
+#endif  // GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE
 
 // TLS security
 #define GCN_TLS_VERSION_MIN BR_TLS12  // Arduino/tools/sdk/include/bearssl/bearssl_ssl.h
 #define GCN_TLS_VERSION_MAX BR_TLS12  // no support yet for TLS 1.3 in BearSSL
 #define GCN_TLS_CIPHERS_HARDEN false  // WARNING: test thouroughly against your servers
 
-// Optional behaviours
+// Optional Serial debugging
 // #define GCN_DEBUG_WIFI_STATUS_CHANGES
 // #define GCN_DEBUG_MQTT_STATUS_CHANGES
 // #define GCN_DEBUG_MAIN_STATE_MACHINE
@@ -91,7 +140,7 @@
 // #define GCN_DEBUG_ARDUINO_OUTPUT_PIN
 // #define GCN_DEBUG_MONITOR_PUSH
 // #define GCN_DEBUG_MONITOR_POP
-#define GCN_DEBUG_MQTT_PUBLISH
+// #define GCN_DEBUG_MQTT_PUBLISH
 // #define GCN_DEBUG_MQTT_SUBSCRIBE
 // #define GCN_DEBUG_MQTT_RECEIVED
 
@@ -100,6 +149,7 @@
 #define GCN_COMMAND_DISCONNECT_WIFI "disconnect_wifi"
 #define GCN_COMMAND_DISCONNECT_MQTT "disconnect_mqtt"
 #define GCN_COMMAND_SYNCHRONIZE_SNTP "synchronize_sntp"
+#define GCN_COMMAND_SEND_METRICS "send_metrics"
 
 // Use dedicated header to customize setting without modifying main code
 // You just have to #undef what you want to change, then #define it with the new value

@@ -5,6 +5,7 @@ void main_state_machine_mqtt_callback(char *topic_utf8, byte *payload, unsigned 
 }
 
 void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned int length) {
+  mqtt_count_received++;
 #ifdef GCN_DEBUG_MQTT_RECEIVED
   print_millis();
   Serial.print("MQTT recv ");
@@ -71,6 +72,15 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
     return;
   }
 #endif  // GCN_COMMAND_REBOOT
+
+#ifdef GCN_COMMAND_SEND_METRICS
+  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_SEND_METRICS)) {
+    print_millis();
+    Serial.println("Received 'send metrics' command");
+    send_metrics();
+    return;
+  }
+#endif  // GCN_COMMAND_SEND_METRICS
 
   print_millis();
   Serial.print("Ignoring unknown MQTT input topic");
@@ -158,8 +168,10 @@ void mqtt_publish_log_serial(const char *start, const char *topic_utf8, const ch
 bool MainStateMachine::mqtt_publish_topic_string(const char *topic_utf8, const char *message, bool retain) {
   bool success = mqtt_client.publish(topic_utf8, message, retain);
   if (!success) {
+    mqtt_count_sent_error++;
     mqtt_publish_log_serial("[ERROR] Could not publish ", topic_utf8, message, retain);
   } else {
+    mqtt_count_sent_ok++;
 #ifdef GCN_DEBUG_MQTT_PUBLISH
     mqtt_publish_log_serial("Published ", topic_utf8, message, retain);
 #endif  // GCN_DEBUG_MQTT_PUBLISH
@@ -178,8 +190,10 @@ void mqtt_subscribe_log_serial(const char *start, const char *topic_utf8, int qo
 bool MainStateMachine::mqtt_subscribe_topic(const char *topic_utf8, int qos) {
   bool success = mqtt_client.subscribe(topic_utf8, qos);
   if (!success) {
+    mqtt_count_subscribe_error++;
     mqtt_subscribe_log_serial("[ERROR] Could not subscribe to ", topic_utf8, qos);
   } else {
+    mqtt_count_subscribe_ok++;
 #ifdef GCN_DEBUG_MQTT_SUBSCRIBE
     mqtt_subscribe_log_serial("Subscribed to ", topic_utf8, qos);
 #endif  // GCN_DEBUG_MQTT_SUBSCRIBE
@@ -210,15 +224,276 @@ void MainStateMachine::state_mqtt_connected_enter() {
   mqtt_subscribe_topic(mqtt_get_in_topic_utf8(1, GCN_COMMAND_REBOOT).c_str(), 1);
 #endif  // GCN_COMMAND_REBOOT
 
-  // TODO: publish metadata (manufacturer, chip, max_ram, freq, etc) as persistent
+#ifdef GCN_COMMAND_SEND_METRICS
+  mqtt_subscribe_topic(mqtt_get_in_topic_utf8(1, GCN_COMMAND_SEND_METRICS).c_str(), 1);
+#endif  // GCN_COMMAND_SEND_METRICS
+
+  // publish hardware metadata as persistent
+  mqtt_publish_hardware_constants();
 }
+
+bool MainStateMachine::mqtt_publish_hardware_constants() {
+  bool success = true;
+  print_millis();
+  Serial.println("Displaying and sending " GCN_MQTT_BROKER_HW_TOPIC "=" GCN_MQTT_BROKER_HW_VALUE " specific information");
+
+  success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(1, GCN_MQTT_BROKER_HW_TOPIC).c_str(), GCN_MQTT_BROKER_HW_VALUE, true);
+
+#ifdef GCN_MQTT_BROKER_ESP8266_TOPIC
+  if (strcmp(GCN_MQTT_BROKER_HW_VALUE, GCN_MQTT_BROKER_ESP8266_TOPIC) == 0) {
+    char buf[sizeof("4294967295")];  // uint32_t
+
+    String tmp_s = ESP.getResetReason();
+    Serial.print("\tLast reset reason : ");
+    Serial.println(tmp_s.c_str());
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_RESET_REASON).c_str(), tmp_s.c_str(), true);
+
+    uint32_t tmp_lu = ESP.getChipId();
+    snprintf(buf, sizeof(buf), "%lu", tmp_lu);
+    Serial.print("\tChip ID : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_CHIP_ID).c_str(), buf, true);
+
+    tmp_s = ESP.getCoreVersion();
+    Serial.print("\tCore version : ");
+    Serial.println(tmp_s.c_str());
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_CORE_VERSION).c_str(), tmp_s.c_str(), true);
+
+    const char *tmp_c = ESP.getSdkVersion();
+    Serial.print("\tSDK version : ");
+    Serial.println(tmp_c);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_SDK_VERSION).c_str(), tmp_c, true);
+
+    uint8_t tmp_byte = ESP.getCpuFreqMHz();
+    snprintf(buf, sizeof(buf), "%u", tmp_byte);
+    Serial.print("\tCPU Frequency MHz : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_CPU_FREQ_MHZ).c_str(), buf, true);
+
+    tmp_lu = ESP.getSketchSize();
+    snprintf(buf, sizeof(buf), "%lu", tmp_lu);
+    Serial.print("\tSketch size : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_SKETCH_SIZE).c_str(), buf, true);
+
+    tmp_lu = ESP.getFreeSketchSpace();
+    snprintf(buf, sizeof(buf), "%lu", tmp_lu);
+    Serial.print("\tFree sketch size : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_FREE_SKETCH_SIZE).c_str(), buf, true);
+
+    tmp_s = ESP.getSketchMD5();
+    Serial.print("\tSketch MD5 : ");
+    Serial.println(tmp_s.c_str());
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_SKETCH_MD5).c_str(), tmp_s.c_str(), true);
+
+    tmp_lu = ESP.getFlashChipId();
+    snprintf(buf, sizeof(buf), "%lu", tmp_lu);
+    Serial.print("\tFlash chip ID : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_FLASH_CHIP_ID).c_str(), buf, true);
+
+    tmp_lu = ESP.getFlashChipSize();
+    snprintf(buf, sizeof(buf), "%lu", tmp_lu);
+    Serial.print("\tFlash chip size : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_FLASH_CHIP_SIZE).c_str(), buf, true);
+
+    tmp_lu = ESP.getFlashChipRealSize();
+    snprintf(buf, sizeof(buf), "%lu", tmp_lu);
+    Serial.print("\tFlash chip real size : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_FLASH_CHIP_REAL_SIZE).c_str(), buf, true);
+
+    tmp_lu = ESP.getFlashChipSpeed();
+    snprintf(buf, sizeof(buf), "%lu", tmp_lu);
+    Serial.print("\tFlash chip speed Hz : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_FLASH_CHIP_SPEED_HZ).c_str(), buf, true);
+
+    bool tmp_bool = ESP.checkFlashCRC();  // takes ~350 ms
+    snprintf(buf, sizeof(buf), "%i", tmp_bool ? 1 : 0);
+    Serial.print("\tCheck flash CRC : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_CHECK_FLASH_CRC).c_str(), buf, true);
+  }
+#endif  // GCN_MQTT_BROKER_ESP8266_TOPIC
+
+  return success;
+}
+
+#if defined(GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE) || defined(GCN_COMMAND_SEND_METRICS)
+bool MainStateMachine::send_metrics() {
+  last_metrics_begin_ms = millis();
+  bool success = true;
+  print_millis();
+  Serial.println("Sending metrics");
+
+  char buf[sizeof("4294967295")];  // uint32_t
+
+  do {  // uptime
+    uint32_t tmp_ul = millis();
+    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    Serial.print("\tSystem uptime ms : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_UPTIME_TOPIC, GCN_MQTT_BROKER_UPTIME_SYSTEM).c_str(), buf, true);
+
+    tmp_ul = millis() - last_wifi_begin_ms;
+    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    Serial.print("\tWifi uptime ms : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_UPTIME_TOPIC, GCN_MQTT_BROKER_UPTIME_WIFI).c_str(), buf, true);
+
+    tmp_ul = millis() - last_sntp_begin_ms;
+    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    Serial.print("\tSNTP uptime ms : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_UPTIME_TOPIC, GCN_MQTT_BROKER_UPTIME_SNTP).c_str(), buf, true);
+
+    tmp_ul = millis() - last_mqtt_begin_ms;
+    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    Serial.print("\tMQTT connection uptime : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_UPTIME_TOPIC, GCN_MQTT_BROKER_UPTIME_MQTT).c_str(), buf, true);
+
+    tmp_ul = time(nullptr);
+    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    Serial.print("\tLocal unix timestamp : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_UPTIME_TOPIC, GCN_MQTT_BROKER_UPTIME_TIMESTAMP).c_str(), buf, true);
+
+  } while (false);
+
+  do {  // WIFI
+    String tmp_s = WiFi.localIP().toString();
+    Serial.print("\tLocal IP : ");
+    Serial.println(tmp_s.c_str());
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_NETWORK_TOPIC, GCN_MQTT_BROKER_NETWORK_LOCAL_IP).c_str(), tmp_s.c_str(), true);
+
+    tmp_s = WiFi.subnetMask().toString();
+    Serial.print("\tNetwork mask : ");
+    Serial.println(tmp_s.c_str());
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_NETWORK_TOPIC, GCN_MQTT_BROKER_NETWORK_NETMASK).c_str(), tmp_s.c_str(), true);
+
+    tmp_s = WiFi.gatewayIP().toString();
+    Serial.print("\tGateway IP : ");
+    Serial.println(tmp_s.c_str());
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_NETWORK_TOPIC, GCN_MQTT_BROKER_NETWORK_GATEWAY_IP).c_str(), tmp_s.c_str(), true);
+
+    for (int i = 0; i < GCN_MQTT_BROKER_NETWORK_DNS_MAX; i++) {
+      IPAddress ip = WiFi.dnsIP(i);
+      if (ip.v4() == 0) {
+        continue;
+      }
+      Serial.print("\tDNS IP ");
+      Serial.print(i);
+      Serial.print(" : ");
+      tmp_s = ip.toString();
+      Serial.println(tmp_s.c_str());
+      snprintf(buf, sizeof(buf), "%u", i);
+      success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(3, GCN_MQTT_BROKER_NETWORK_TOPIC, GCN_MQTT_BROKER_NETWORK_DNS, buf).c_str(), tmp_s.c_str(), true);
+    }
+
+    tmp_s = WiFi.SSID();
+    Serial.print("\tWifi SSID : ");
+    Serial.println(tmp_s.c_str());
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_NETWORK_TOPIC, GCN_MQTT_BROKER_NETWORK_SSID).c_str(), tmp_s.c_str(), true);
+
+    /* IMPORTANT : do absolutely NOT implement sending WiFi.psk() as this is sensitive and private user information which we do not want to be responsible for */
+
+    tmp_s = WiFi.BSSIDstr();
+    Serial.print("\tWifi BSSID : ");
+    Serial.println(tmp_s.c_str());
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_NETWORK_TOPIC, GCN_MQTT_BROKER_NETWORK_BSSID).c_str(), tmp_s.c_str(), true);
+
+    int8_t tmp_i = WiFi.RSSI();
+    snprintf(buf, sizeof(buf), "%i", tmp_i);
+    Serial.print("\tWifi RSSI : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_NETWORK_TOPIC, GCN_MQTT_BROKER_NETWORK_RSSI).c_str(), buf, true);
+  } while (false);
+
+  do {  // MQTT
+    uint32_t tmp_ul = mqtt_count_sent_ok;
+    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    Serial.print("\tMQTT publish OK : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_SENT_OK).c_str(), buf, true);
+
+    tmp_ul = mqtt_count_sent_error;
+    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    Serial.print("\tMQTT publish FAIL : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_SENT_ERROR).c_str(), buf, true);
+
+    tmp_ul = mqtt_count_subscribe_ok;
+    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    Serial.print("\tMQTT subscribe OK : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_SUBSCRIBE_OK).c_str(), buf, true);
+
+    tmp_ul = mqtt_count_subscribe_error;
+    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    Serial.print("\tMQTT subscribe FAIL : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_SUBSCRIBE_ERROR).c_str(), buf, true);
+
+    tmp_ul = mqtt_count_connect_ok;
+    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    Serial.print("\tMQTT connect OK : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_CONNECT_OK).c_str(), buf, true);
+
+    tmp_ul = mqtt_count_connect_error;
+    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    Serial.print("\tMQTT connect FAIL : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_CONNECT_ERROR).c_str(), buf, true);
+
+    tmp_ul = mqtt_count_received;
+    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    Serial.print("\tMQTT received : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_RECEIVED).c_str(), buf, true);
+  } while (false);
+
+#ifdef GCN_MQTT_BROKER_ESP8266_TOPIC
+  do {  // esp8266
+    uint32_t tmp_ul = ESP.getFreeHeap();
+    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    Serial.print("\tFree heap : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_FREE_HEAP).c_str(), buf, true);
+
+    uint8_t tmp_byte = ESP.getHeapFragmentation();
+    snprintf(buf, sizeof(buf), "%u", tmp_byte);
+    Serial.print("\tHeap fragmentation : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_HEAP_FRAGMENTATION_PERCENT).c_str(), buf, true);
+
+    tmp_ul = ESP.getMaxFreeBlockSize();
+    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    Serial.print("\tMax free block size on the heap : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_MAX_FREE_BLOCK_SIZE).c_str(), buf, true);
+  } while (false);
+#endif  // GCN_MQTT_BROKER_ESP8266_TOPIC
+
+  return success;
+}
+#endif  // defined(GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE) || defined(GCN_COMMAND_SEND_METRICS)
 
 void MainStateMachine::state_mqtt_connected_task() {
   // Flushing all monitors to MQTT once per loop (only if they have anything stored)
   // This means at most N messages (1 per monitored pin) are sent to the broker each time
   InterruptGpioMonitors::mqtt_flush_all_once(*this);
 
-  // TODO: publish uptime, wifi uptime, mqtt uptime, sntp timestamp, ... periodically
+#ifdef GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE
+  // Periodic metrics update
+  if (millis() - last_metrics_begin_ms > GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE * 60 * 1000 || last_metrics_begin_ms == 0) {
+    send_metrics();
+  }
+#endif  // GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE
 }
 
 void MainStateMachine::mqtt_flush_monitor_once(InterruptGpioMonitor &monitor) {
@@ -235,8 +510,8 @@ void MainStateMachine::mqtt_flush_monitor_once(InterruptGpioMonitor &monitor) {
   }
 
   // send sample to broker
-  String pin_topic = mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_GPIO_MESSAGE, monitor.gpio_name.c_str());
-  char buf[sizeof("0 4294967295")];  // bit is guaranteed to be 0 or 1
+  String pin_topic = mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_GPIO_TOPIC, monitor.gpio_name.c_str());
+  char buf[sizeof("0 4294967295")];  // bit is guaranteed to be 0 or 1, timestamp is an uint32_t
   snprintf(buf, sizeof(buf), "%i %lu", bit, timestamp);
   mqtt_publish_topic_string(pin_topic.c_str(), buf, true);
 }

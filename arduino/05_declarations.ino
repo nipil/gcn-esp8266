@@ -79,7 +79,7 @@ public:
 
   InterruptGpioMonitor(const String gpio_symbol_s, const uint8_t gpio_symbol_i);
   void setup();
-  void push_front();
+  void push_front(const uint32_t timestamp, const uint8_t bit);
   bool pop_back(uint32_t &timestamp, uint8_t &bit);
   void print();
 
@@ -128,11 +128,24 @@ private:
   LightStateMachine &light_state_machine;
   MainState main_state;
 
-  unsigned long last_wifi_begin_ms;
   IPAddress last_wifi_address;
+  unsigned long last_wifi_begin_ms;
   unsigned long last_sntp_begin_ms;
   unsigned long last_mqtt_begin_ms;
   unsigned long next_mqtt_retry_ms;
+
+  unsigned long mqtt_count_sent_ok;
+  unsigned long mqtt_count_sent_error;
+  unsigned long mqtt_count_connect_ok;
+  unsigned long mqtt_count_connect_error;
+  unsigned long mqtt_count_subscribe_ok;
+  unsigned long mqtt_count_subscribe_error;
+  unsigned long mqtt_count_received;
+
+#if defined(GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE) || defined(GCN_COMMAND_SEND_METRICS)
+  unsigned long last_metrics_begin_ms;
+  bool send_metrics();
+#endif  // defined(GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE) || defined(GCN_COMMAND_SEND_METRICS)
 
 #ifdef GCN_DEBUG_WIFI_STATUS_CHANGES
   wl_status_t last_wifi_status = WL_NO_SHIELD;
@@ -170,6 +183,7 @@ private:
   void sntp_synchronize();
   bool mqtt_publish_topic_string(const char *topic_utf8, const char *message, bool retain);
   bool mqtt_subscribe_topic(const char *topic_utf8, int qos);
+  bool mqtt_publish_hardware_constants();
   String mqtt_get_client_id_utf8();
   String mqtt_get_will_topic_utf8();
   String mqtt_get_in_topic_utf8(int n, ... /* const char * */);

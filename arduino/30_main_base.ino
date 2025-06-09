@@ -97,6 +97,9 @@ void MainStateMachine::state_reboot_enter() {
 }
 
 void MainStateMachine::state_reboot_task() {
+  mqtt_client.disconnect();
+  WiFi.disconnect();
+  delay(1000);
   ESP.restart();
 }
 

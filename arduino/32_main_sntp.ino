@@ -43,6 +43,7 @@ void MainStateMachine::state_sntp_connected_task() {
     GCN_MQTT_BROKER_CLEAN_SESSION);
 
   if (!success) {
+    mqtt_count_connect_error++;
     next_mqtt_retry_ms = millis() + GCN_MQTT_BROKER_RETRY_MS;
     print_millis();
     Serial.print("[ERROR] Could not connect to MQTT broker (client state ");
@@ -51,6 +52,8 @@ void MainStateMachine::state_sntp_connected_task() {
     Serial.print(GCN_MQTT_BROKER_RETRY_MS);
     Serial.println("ms");
     return;
+  } else {
+    mqtt_count_connect_ok++;
   }
 
   print_millis();

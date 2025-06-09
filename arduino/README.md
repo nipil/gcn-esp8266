@@ -31,10 +31,11 @@ Features :
   - disconnect from wifi
   - reboot
 
-- auxiliary functions
+- Auxiliary functions
   - blinking led for status and mode
   - fully informative serial output
   - compile-time configurable debugging output
+  - collecting metrics (uptime, network, memory, mqtt)
 
 ## Board setup
 

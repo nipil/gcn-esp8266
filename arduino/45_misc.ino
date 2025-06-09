@@ -22,5 +22,3 @@ void loop() {
   delay(GCN_LOOP_MIN_DELAY_MS);
   main_state_machine.update();
 }
-
-// https://arduino-esp8266.readthedocs.io/en/stable/reference.html

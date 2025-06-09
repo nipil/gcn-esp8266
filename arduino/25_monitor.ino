@@ -15,9 +15,8 @@ void InterruptGpioMonitor::setup() {
   last_change_ms = millis();
 }
 
-void InterruptGpioMonitor::push_front() {
+void InterruptGpioMonitor::push_front(const uint32_t timestamp, const uint8_t bit) {
   // debounce
-  uint8_t bit = digitalRead(gpio_number);
   if (bit == last_value) {
     return;
   }
@@ -29,7 +28,6 @@ void InterruptGpioMonitor::push_front() {
   last_change_ms = now_ms;
 
   // optimize and serialize
-  uint32_t timestamp = time(nullptr);
   uint32_t item = ((timestamp - timestamp_offset) & 0x7FFFFFFF) | ((bit & 0x01) << 31);
 
   // store
@@ -123,7 +121,9 @@ void InterruptGpioMonitor::print() {
 
 #define GCN_MONITORED_DIGITAL_PIN_CHANGED_ISR(GPIO_NAME) \
   ICACHE_RAM_ATTR static void gpio_changed_isr_##GPIO_NAME() { \
-    InterruptGpioMonitors::gpio_changed_monitor_##GPIO_NAME.push_front(); \
+    uint8_t bit = digitalRead(GPIO_NAME); \
+    uint32_t timestamp = time(nullptr); \
+    InterruptGpioMonitors::gpio_changed_monitor_##GPIO_NAME.push_front(timestamp, bit); \
   }
 
 class InterruptGpioMonitors {
