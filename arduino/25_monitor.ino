@@ -1,6 +1,6 @@
 // GPIO CHANGE NOTIFIER (C) NIPIL 2025+
 
-InterruptGpioMonitor::InterruptGpioMonitor(const String gpio_symbol_s, const uint8_t gpio_symbol_i)
+InterruptGpioMonitor::InterruptGpioMonitor(const char* gpio_symbol_s, const uint8_t gpio_symbol_i)
   : gpio_name(gpio_symbol_s), gpio_number(gpio_symbol_i), head(0), tail(0) {
 }
 
@@ -31,7 +31,7 @@ void InterruptGpioMonitor::push_front(const uint32_t timestamp, const uint8_t bi
   uint32_t item = ((timestamp - timestamp_offset) & 0x7FFFFFFF) | ((bit & 0x01) << 31);
 
   // store
-  int next = (head + 1) & mask;
+  unsigned int next = (head + 1) & mask;
   if (next == tail) {
     tail = (tail + 1) & mask;  // drop oldest element
   }
@@ -86,7 +86,7 @@ void InterruptGpioMonitor::print() {
   print_millis();
   Serial.print("Monitor STATE: pin_number=");
   Serial.print(gpio_number);
-  for (int i = 0; i <= mask; i++) {
+  for (unsigned int i = 0; i <= mask; i++) {
     Serial.print(" ");
     snprintf(buf, sizeof(buf), "%08x", ring[i]);
     Serial.print(buf);
@@ -120,7 +120,7 @@ void InterruptGpioMonitor::print() {
   } while (0);
 
 #define GCN_MONITORED_DIGITAL_PIN_CHANGED_ISR(GPIO_NAME) \
-  ICACHE_RAM_ATTR static void gpio_changed_isr_##GPIO_NAME() { \
+  IRAM_ATTR static void gpio_changed_isr_##GPIO_NAME() { \
     uint8_t bit = digitalRead(GPIO_NAME); \
     uint32_t timestamp = time(nullptr); \
     InterruptGpioMonitors::gpio_changed_monitor_##GPIO_NAME.push_front(timestamp, bit); \

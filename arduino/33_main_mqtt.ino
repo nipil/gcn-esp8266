@@ -4,6 +4,23 @@ void main_state_machine_mqtt_callback(char *topic_utf8, byte *payload, unsigned 
   main_state_machine.mqtt_callback(topic_utf8, payload, length);
 }
 
+void debug_payload(byte *payload, unsigned int length) {
+  for (unsigned int i = 0; i < length; i++) {
+    Serial.print(payload[i], HEX);
+  }
+  Serial.println();
+  for (unsigned int i = 0; i < length; i++) {
+    char value = (char)payload[i];
+    Serial.print(' ');
+    if (value >= 0x20 && value <= 0x7F) {  // ASCII range
+      Serial.print(value);
+    } else {
+      Serial.print(' ');  // replacement character
+    }
+  }
+  Serial.println();
+}
+
 void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned int length) {
   mqtt_count_received++;
 #ifdef GCN_DEBUG_MQTT_RECEIVED
@@ -13,20 +30,7 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
   Serial.print(" bytes topic ");
   Serial.println(topic_utf8);
   if (length > 0) {
-    for (int i = 0; i < length; i++) {
-      Serial.print(payload[i], HEX);
-    }
-    Serial.println();
-    for (int i = 0; i < length; i++) {
-      char value = (char)payload[i];
-      Serial.print(' ');
-      if (value >= 0x20 && value <= 0x7F) {  // ASCII range
-        Serial.print(value);
-      } else {
-        Serial.print(' ');  // replacement character
-      }
-    }
-    Serial.println();
+    debug_payload(payload, length);
   }
 #endif  // GCN_DEBUG_MQTT_RECEIVED
 
@@ -83,7 +87,14 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
 #endif  // GCN_COMMAND_SEND_METRICS
 
   print_millis();
-  Serial.print("Ignoring unknown MQTT input topic");
+  Serial.print("Ignoring unknown input : ");
+  Serial.print(" length ");
+  Serial.print(length);
+  if (length > 0) {
+    Serial.print("1st_hex_byte ");
+    Serial.print(payload[0], HEX);
+  }
+  Serial.print(" topic ");
   Serial.println(topic_utf8);
 }
 
@@ -249,7 +260,7 @@ bool MainStateMachine::mqtt_publish_hardware_constants() {
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_RESET_REASON).c_str(), tmp_s.c_str(), true);
 
     uint32_t tmp_lu = ESP.getChipId();
-    snprintf(buf, sizeof(buf), "%lu", tmp_lu);
+    snprintf(buf, sizeof(buf), "%u", tmp_lu);
     Serial.print("\tChip ID : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_CHIP_ID).c_str(), buf, true);
@@ -271,13 +282,13 @@ bool MainStateMachine::mqtt_publish_hardware_constants() {
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_CPU_FREQ_MHZ).c_str(), buf, true);
 
     tmp_lu = ESP.getSketchSize();
-    snprintf(buf, sizeof(buf), "%lu", tmp_lu);
+    snprintf(buf, sizeof(buf), "%u", tmp_lu);
     Serial.print("\tSketch size : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_SKETCH_SIZE).c_str(), buf, true);
 
     tmp_lu = ESP.getFreeSketchSpace();
-    snprintf(buf, sizeof(buf), "%lu", tmp_lu);
+    snprintf(buf, sizeof(buf), "%u", tmp_lu);
     Serial.print("\tFree sketch size : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_FREE_SKETCH_SIZE).c_str(), buf, true);
@@ -288,25 +299,25 @@ bool MainStateMachine::mqtt_publish_hardware_constants() {
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_SKETCH_MD5).c_str(), tmp_s.c_str(), true);
 
     tmp_lu = ESP.getFlashChipId();
-    snprintf(buf, sizeof(buf), "%lu", tmp_lu);
+    snprintf(buf, sizeof(buf), "%u", tmp_lu);
     Serial.print("\tFlash chip ID : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_FLASH_CHIP_ID).c_str(), buf, true);
 
     tmp_lu = ESP.getFlashChipSize();
-    snprintf(buf, sizeof(buf), "%lu", tmp_lu);
+    snprintf(buf, sizeof(buf), "%u", tmp_lu);
     Serial.print("\tFlash chip size : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_FLASH_CHIP_SIZE).c_str(), buf, true);
 
     tmp_lu = ESP.getFlashChipRealSize();
-    snprintf(buf, sizeof(buf), "%lu", tmp_lu);
+    snprintf(buf, sizeof(buf), "%u", tmp_lu);
     Serial.print("\tFlash chip real size : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_FLASH_CHIP_REAL_SIZE).c_str(), buf, true);
 
     tmp_lu = ESP.getFlashChipSpeed();
-    snprintf(buf, sizeof(buf), "%lu", tmp_lu);
+    snprintf(buf, sizeof(buf), "%u", tmp_lu);
     Serial.print("\tFlash chip speed Hz : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_FLASH_CHIP_SPEED_HZ).c_str(), buf, true);
@@ -333,31 +344,31 @@ bool MainStateMachine::send_metrics() {
 
   do {  // uptime
     uint32_t tmp_ul = millis();
-    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
     Serial.print("\tSystem uptime ms : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_UPTIME_TOPIC, GCN_MQTT_BROKER_UPTIME_SYSTEM).c_str(), buf, true);
 
     tmp_ul = millis() - last_wifi_begin_ms;
-    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
     Serial.print("\tWifi uptime ms : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_UPTIME_TOPIC, GCN_MQTT_BROKER_UPTIME_WIFI).c_str(), buf, true);
 
     tmp_ul = millis() - last_sntp_begin_ms;
-    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
     Serial.print("\tSNTP uptime ms : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_UPTIME_TOPIC, GCN_MQTT_BROKER_UPTIME_SNTP).c_str(), buf, true);
 
     tmp_ul = millis() - last_mqtt_begin_ms;
-    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
     Serial.print("\tMQTT connection uptime : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_UPTIME_TOPIC, GCN_MQTT_BROKER_UPTIME_MQTT).c_str(), buf, true);
 
     tmp_ul = time(nullptr);
-    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
     Serial.print("\tLocal unix timestamp : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_UPTIME_TOPIC, GCN_MQTT_BROKER_UPTIME_TIMESTAMP).c_str(), buf, true);
@@ -415,43 +426,43 @@ bool MainStateMachine::send_metrics() {
 
   do {  // MQTT
     uint32_t tmp_ul = mqtt_count_sent_ok;
-    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
     Serial.print("\tMQTT publish OK : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_SENT_OK).c_str(), buf, true);
 
     tmp_ul = mqtt_count_sent_error;
-    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
     Serial.print("\tMQTT publish FAIL : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_SENT_ERROR).c_str(), buf, true);
 
     tmp_ul = mqtt_count_subscribe_ok;
-    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
     Serial.print("\tMQTT subscribe OK : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_SUBSCRIBE_OK).c_str(), buf, true);
 
     tmp_ul = mqtt_count_subscribe_error;
-    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
     Serial.print("\tMQTT subscribe FAIL : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_SUBSCRIBE_ERROR).c_str(), buf, true);
 
     tmp_ul = mqtt_count_connect_ok;
-    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
     Serial.print("\tMQTT connect OK : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_CONNECT_OK).c_str(), buf, true);
 
     tmp_ul = mqtt_count_connect_error;
-    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
     Serial.print("\tMQTT connect FAIL : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_CONNECT_ERROR).c_str(), buf, true);
 
     tmp_ul = mqtt_count_received;
-    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
     Serial.print("\tMQTT received : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_RECEIVED).c_str(), buf, true);
@@ -460,7 +471,7 @@ bool MainStateMachine::send_metrics() {
 #ifdef GCN_MQTT_BROKER_ESP8266_TOPIC
   do {  // esp8266
     uint32_t tmp_ul = ESP.getFreeHeap();
-    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
     Serial.print("\tFree heap : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_FREE_HEAP).c_str(), buf, true);
@@ -472,7 +483,7 @@ bool MainStateMachine::send_metrics() {
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_HEAP_FRAGMENTATION_PERCENT).c_str(), buf, true);
 
     tmp_ul = ESP.getMaxFreeBlockSize();
-    snprintf(buf, sizeof(buf), "%lu", tmp_ul);
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
     Serial.print("\tMax free block size on the heap : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_ESP8266_TOPIC, GCN_MQTT_BROKER_ESP8266_TOPIC_MAX_FREE_BLOCK_SIZE).c_str(), buf, true);
@@ -510,9 +521,9 @@ void MainStateMachine::mqtt_flush_monitor_once(InterruptGpioMonitor &monitor) {
   }
 
   // send sample to broker
-  String pin_topic = mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_GPIO_TOPIC, monitor.gpio_name.c_str());
+  String pin_topic = mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_GPIO_TOPIC, monitor.gpio_name);
   char buf[sizeof("0 4294967295")];  // bit is guaranteed to be 0 or 1, timestamp is an uint32_t
-  snprintf(buf, sizeof(buf), "%i %lu", bit, timestamp);
+  snprintf(buf, sizeof(buf), "%i %u", bit, timestamp);
   mqtt_publish_topic_string(pin_topic.c_str(), buf, true);
 }
 

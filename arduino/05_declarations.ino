@@ -33,6 +33,7 @@ public:
   void setup();
   void on();
   void off();
+
 private:
   const int pin_number;
   const bool invert;
@@ -74,10 +75,10 @@ private:
 // Used to monitor GPIO changes and buffer them (as possible !) until they are sent to MQTT
 class InterruptGpioMonitor {
 public:
-  const String gpio_name;
+  const char *gpio_name;
   const uint8_t gpio_number;
 
-  InterruptGpioMonitor(const String gpio_symbol_s, const uint8_t gpio_symbol_i);
+  InterruptGpioMonitor(const char *gpio_symbol_s, const uint8_t gpio_symbol_i);
   void setup();
   void push_front(const uint32_t timestamp, const uint8_t bit);
   bool pop_back(uint32_t &timestamp, uint8_t &bit);
@@ -155,7 +156,7 @@ private:
 #ifdef GCN_DEBUG_MQTT_STATUS_CHANGES
   int last_mqtt_state = -1;
   bool last_mqtt_connected = false;
-#endif  //GCN_DEBUG_MQTT_STATUS_CHANGES
+#endif  // GCN_DEBUG_MQTT_STATUS_CHANGES
 
   void set_state(const MainState new_state);
   void run_enters();
