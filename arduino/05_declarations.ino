@@ -71,6 +71,37 @@ private:
   unsigned long millis_since_last_event();
 };
 
+// Used to monitor GPIO changes and buffer them (as possible !) until they are sent to MQTT
+class InterruptGpioMonitor {
+public:
+  const String gpio_name;
+  const uint8_t gpio_number;
+
+  InterruptGpioMonitor(const String gpio_symbol_s, const uint8_t gpio_symbol_i);
+  void setup();
+  void push_front();
+  bool pop_back(uint32_t &timestamp, uint8_t &bit);
+  void print();
+
+private:
+  // debounce inputs
+  uint8_t last_value;
+  uint32_t last_change_ms;
+
+  // MUST be a power of 2, so that the ring can be optimized for and'ing
+  static const unsigned int mask = (1 << GCN_MONITOR_CHANGE_QUEUE_DEFAULT_SIZE_TWO_POW) - 1;
+
+  // i optimize the entry size by storing the GPIO value (1 bit) in MSB
+  // which would leave max 'storable' timestamp to 2147483647, ie Tue Jan 19 2038 03:14:07 GMT+0000
+  // so i subtract an 'offset' from the 'real' unix timestamp' in order to widen the scheme longevity
+  // this way the max 'storable' timestamp becomes 3847483647, ie Mon Dec 03 2091 01:27:27 GMT+0000
+  const uint32_t timestamp_offset = 1700000000;  // Tue Nov 14 2023 22:13:20 GMT+0000
+
+  uint32_t ring[mask + 1];
+  unsigned int head;
+  unsigned int tail;
+};
+
 class MainStateMachine {
 
 public:
@@ -78,9 +109,9 @@ public:
   void setup();
   void update();
   void mqtt_callback(char *topic, byte *payload, unsigned int length);
+  void mqtt_flush_monitor_once(InterruptGpioMonitor &monitor);
 
 private:
-
   typedef enum {
     MAIN_STATE_ERROR = -2,
     MAIN_STATE_REBOOT = -1,
@@ -91,9 +122,6 @@ private:
     MAIN_STATE_SNTP_CONNECTED = 20,
     MAIN_STATE_MQTT_CONNECTED = 30,
   } MainState;
-
-  const String mqtt_will_topic_utf8 = mqtt_get_will_topic_utf8();
-  const String mqtt_client_id_utf8 = mqtt_get_client_id_utf8();
 
   int wifi_credentials_index;
   PubSubClient &mqtt_client;
@@ -140,42 +168,12 @@ private:
   bool is_sntp_connected();
   bool is_mqtt_connected();
   void sntp_synchronize();
-  bool mqtt_publish_topic_string(const String &topic, const String &message, bool retain);
-  bool mqtt_subscribe_topic(const String &topic_utf8, int qos);
+  bool mqtt_publish_topic_string(const char *topic_utf8, const char *message, bool retain);
+  bool mqtt_subscribe_topic(const char *topic_utf8, int qos);
   String mqtt_get_client_id_utf8();
-  String mqtt_get_in_sub_topic_utf8(char *sub_topic);
-  String mqtt_get_out_sub_topic_utf8(char *sub_topic);
   String mqtt_get_will_topic_utf8();
-};
-
-// Used to monitor GPIO changes and buffer them (as possible !) until they are sent to MQTT
-class InterruptGpioMonitor {
-public:
-  InterruptGpioMonitor(const String gpio_symbol_s, const uint8_t gpio_symbol_i);
-  void setup();
-  void record();
-  bool pop(uint32_t &timestamp, uint8_t &bit);
-  void print();
-
-private:
-  // debounce inputs
-  uint8_t last_value;
-  uint32_t last_change_ms;
-
-  // MUST be a power of 2, so that the ring can be optimized for and'ing
-  static const unsigned int mask = (1 << GCN_MONITOR_CHANGE_QUEUE_DEFAULT_SIZE_TWO_POW) - 1;
-
-  // i optimize the entry size by storing the GPIO value (1 bit) in MSB
-  // which would leave max 'storable' timestamp to 2147483647, ie Tue Jan 19 2038 03:14:07 GMT+0000
-  // so i subtract an 'offset' from the 'real' unix timestamp' in order to widen the scheme longevity
-  // this way the max 'storable' timestamp becomes 3847483647, ie Mon Dec 03 2091 01:27:27 GMT+0000
-  const uint32_t timestamp_offset = 1700000000;  // Tue Nov 14 2023 22:13:20 GMT+0000
-
-  uint32_t ring[mask + 1];
-  unsigned int head;
-  unsigned int tail;
-  const String gpio_name;
-  const uint8_t gpio_number;
+  String mqtt_get_in_topic_utf8(int n, ... /* const char * */);
+  String mqtt_get_out_topic_utf8(int n, ... /* const char * */);
 };
 
 // Dependency injection

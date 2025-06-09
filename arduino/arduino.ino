@@ -76,6 +76,7 @@
 #define GCN_MQTT_BROKER_WILL_MESSAGE "offline"
 #define GCN_MQTT_BROKER_BORN_MESSAGE "online"
 #define GCN_MQTT_BROKER_CLEAN_SESSION true
+#define GCN_MQTT_BROKER_GPIO_MESSAGE "gpio"
 
 // TLS security
 #define GCN_TLS_VERSION_MIN BR_TLS12  // Arduino/tools/sdk/include/bearssl/bearssl_ssl.h
@@ -88,12 +89,13 @@
 // #define GCN_DEBUG_MAIN_STATE_MACHINE
 // #define GCN_DEBUG_LIGHT_STATE_MACHINE
 // #define GCN_DEBUG_ARDUINO_OUTPUT_PIN
-// #define GCN_DEBUG_MONITOR_RECORD
-#define GCN_DEBUG_MONITOR_POP
-// #define GCN_DEBUG_MQTT_PUBLISH
+// #define GCN_DEBUG_MONITOR_PUSH
+// #define GCN_DEBUG_MONITOR_POP
+#define GCN_DEBUG_MQTT_PUBLISH
 // #define GCN_DEBUG_MQTT_SUBSCRIBE
+// #define GCN_DEBUG_MQTT_RECEIVED
 
-// Input commands
+// Optional input commands (comment to disable)
 #define GCN_COMMAND_REBOOT "reboot"
 #define GCN_COMMAND_DISCONNECT_WIFI "disconnect_wifi"
 #define GCN_COMMAND_DISCONNECT_MQTT "disconnect_mqtt"

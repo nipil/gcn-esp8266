@@ -1,8 +1,7 @@
 // GPIO CHANGE NOTIFIER (C) NIPIL 2025+
 
 MainStateMachine::MainStateMachine(PubSubClient &mqtt_client, LightStateMachine &light_state_machine)
-  : mqtt_client(mqtt_client), light_state_machine(light_state_machine), main_state(MAIN_STATE_BOOT),
-    mqtt_client_id_utf8(mqtt_get_client_id_utf8()), mqtt_will_topic_utf8(mqtt_get_will_topic_utf8()) {
+  : mqtt_client(mqtt_client), light_state_machine(light_state_machine), main_state(MAIN_STATE_BOOT) {
 }
 
 void MainStateMachine::run_enters() {
@@ -158,10 +157,10 @@ void MainStateMachine::setup() {
   light_state_machine.setup();
   print_millis();
   Serial.print("MQTT client-id ");
-  Serial.println(mqtt_client_id_utf8.c_str());
+  Serial.println(mqtt_get_client_id_utf8().c_str());
   print_millis();
   Serial.print("MQTT will topic ");
-  Serial.print(mqtt_will_topic_utf8.c_str());
+  Serial.print(mqtt_get_will_topic_utf8().c_str());
   Serial.print(" qos ");
   Serial.print(GCN_MQTT_BROKER_WILL_QOS);
   Serial.print(" retain ");

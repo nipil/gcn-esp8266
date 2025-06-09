@@ -5,7 +5,7 @@ void main_state_machine_mqtt_callback(char *topic_utf8, byte *payload, unsigned 
 }
 
 void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned int length) {
-#ifdef GCN_DEBUG_MQTT_SUBSCRIBE
+#ifdef GCN_DEBUG_MQTT_RECEIVED
   print_millis();
   Serial.print("MQTT recv ");
   Serial.print(length);
@@ -27,12 +27,12 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
     }
     Serial.println();
   }
-#endif  // GCN_DEBUG_MQTT_SUBSCRIBE
+#endif  // GCN_DEBUG_MQTT_RECEIVED
 
   String topic(topic_utf8);
 
 #ifdef GCN_COMMAND_SYNCHRONIZE_SNTP
-  if (topic == mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_SYNCHRONIZE_SNTP)) {
+  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_SYNCHRONIZE_SNTP)) {
     print_millis();
     Serial.println("Received 'synchronize SNTP' command");
     sntp_synchronize();
@@ -41,7 +41,7 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
 #endif  // GCN_COMMAND_SYNCHRONIZE_SNTP
 
 #ifdef GCN_COMMAND_DISCONNECT_MQTT
-  if (topic == mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_MQTT)) {
+  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_DISCONNECT_MQTT)) {
     print_millis();
     Serial.println("Received 'disconnect MQTT' command");
     mqtt_client.disconnect();
@@ -51,7 +51,7 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
 #endif  // GCN_COMMAND_DISCONNECT_MQTT
 
 #ifdef GCN_COMMAND_DISCONNECT_WIFI
-  if (topic == mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_WIFI)) {
+  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_DISCONNECT_WIFI)) {
     print_millis();
     Serial.println("Received 'disconnect wifi' command");
     mqtt_client.disconnect();
@@ -62,7 +62,7 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
 #endif  // GCN_COMMAND_DISCONNECT_WIFI
 
 #ifdef GCN_COMMAND_REBOOT
-  if (topic == mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_REBOOT)) {
+  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_REBOOT)) {
     print_millis();
     Serial.println("Received 'reboot' command");
     mqtt_client.disconnect();
@@ -77,12 +77,37 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
   Serial.println(topic_utf8);
 }
 
-String mqtt_get_sub_topic_utf8(const char *topic_direction, const char *sub_topic) {
-  return String(GCN_MQTT_BROKER_APP_TOPIC) + String("/") + String(WiFi.macAddress()) + String("/") + String(topic_direction) + String("/") + String(sub_topic);
+String mqtt_get_topic_utf8(const char *topic_direction, int n, va_list args /* const char* */) {
+  String tmp(GCN_MQTT_BROKER_APP_TOPIC);
+  tmp += "/";
+  tmp += String(WiFi.macAddress());
+  tmp += "/";
+  tmp += topic_direction;
+  for (int i = 0; i < n; i++) {
+    tmp += "/";
+    tmp += va_arg(args, const char *);
+  }
+  return tmp;
+}
+
+String MainStateMachine::mqtt_get_in_topic_utf8(int n, ... /* const char* */) {
+  va_list args;
+  va_start(args, n);
+  String result = mqtt_get_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, n, args);
+  va_end(args);
+  return result;
+}
+
+String MainStateMachine::mqtt_get_out_topic_utf8(int n, ... /* const char* */) {
+  va_list args;
+  va_start(args, n);
+  String result = mqtt_get_topic_utf8(GCN_MQTT_BROKER_OUT_TOPIC, n, args);
+  va_end(args);
+  return result;
 }
 
 String MainStateMachine::mqtt_get_will_topic_utf8() {
-  return mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_OUT_TOPIC, GCN_MQTT_BROKER_WILL_TOPIC);
+  return mqtt_get_out_topic_utf8(1, GCN_MQTT_BROKER_WILL_TOPIC);
 }
 
 String MainStateMachine::mqtt_get_client_id_utf8() {
@@ -120,33 +145,46 @@ bool MainStateMachine::is_mqtt_connected() {
   return connected;
 }
 
-bool MainStateMachine::mqtt_publish_topic_string(const String &topic_utf8, const String &message, bool retain) {
-  bool result = mqtt_client.publish(topic_utf8.c_str(), message.c_str(), retain);
-#ifdef GCN_DEBUG_MQTT_PUBLISH
+void mqtt_publish_log_serial(const char *start, const char *topic_utf8, const char *message, bool retain) {
   print_millis();
-  Serial.print("MQTT publish ");
-  Serial.print(result ? "OK" : "FAIL");
-  Serial.print(" retain ");
-  Serial.print(retain ? "YES" : "NO");
-  Serial.print(" topic ");
-  Serial.print(topic_utf8.c_str());
-  Serial.print(" message ");
-  Serial.println(message.c_str());
-#endif  // GCN_DEBUG_MQTT_PUBLISH
-  return result;
+  Serial.print(start);
+  Serial.print(retain ? "retained " : "");
+  Serial.print("message to topic ");
+  Serial.print(topic_utf8);
+  Serial.print(" with text message ");
+  Serial.println(message);
 }
 
-bool MainStateMachine::mqtt_subscribe_topic(const String &topic_utf8, int qos) {
-  const char *topic = topic_utf8.c_str();
-  bool result = mqtt_client.subscribe(topic, qos);
+bool MainStateMachine::mqtt_publish_topic_string(const char *topic_utf8, const char *message, bool retain) {
+  bool success = mqtt_client.publish(topic_utf8, message, retain);
+  if (!success) {
+    mqtt_publish_log_serial("[ERROR] Could not publish ", topic_utf8, message, retain);
+  } else {
+#ifdef GCN_DEBUG_MQTT_PUBLISH
+    mqtt_publish_log_serial("Published ", topic_utf8, message, retain);
+#endif  // GCN_DEBUG_MQTT_PUBLISH
+  }
+  return success;
+}
+
+void mqtt_subscribe_log_serial(const char *start, const char *topic_utf8, int qos) {
   print_millis();
-  Serial.print("MQTT subscribing to ");
-  Serial.print(topic);
-  Serial.print(" qos ");
+  Serial.print(start);
   Serial.print(qos);
-  Serial.print(" result ");
-  Serial.println(result ? "OK" : "FAIL");
-  return result;
+  Serial.print(" topic ");
+  Serial.println(topic_utf8);
+}
+
+bool MainStateMachine::mqtt_subscribe_topic(const char *topic_utf8, int qos) {
+  bool success = mqtt_client.subscribe(topic_utf8, qos);
+  if (!success) {
+    mqtt_subscribe_log_serial("[ERROR] Could not subscribe to ", topic_utf8, qos);
+  } else {
+#ifdef GCN_DEBUG_MQTT_SUBSCRIBE
+    mqtt_subscribe_log_serial("Subscribed to ", topic_utf8, qos);
+#endif  // GCN_DEBUG_MQTT_SUBSCRIBE
+  }
+  return success;
 }
 
 void MainStateMachine::state_mqtt_connected_enter() {
@@ -157,34 +195,50 @@ void MainStateMachine::state_mqtt_connected_enter() {
   Serial.println(" ms");
 
 #ifdef GCN_COMMAND_SYNCHRONIZE_SNTP
-  mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_SYNCHRONIZE_SNTP), 1);
+  mqtt_subscribe_topic(mqtt_get_in_topic_utf8(1, GCN_COMMAND_SYNCHRONIZE_SNTP).c_str(), 1);
 #endif  // GCN_COMMAND_SYNCHRONIZE_SNTP
 
 #ifdef GCN_COMMAND_DISCONNECT_MQTT
-  mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_MQTT), 1);
+  mqtt_subscribe_topic(mqtt_get_in_topic_utf8(1, GCN_COMMAND_DISCONNECT_MQTT).c_str(), 1);
 #endif  // GCN_COMMAND_DISCONNECT_MQTT
 
 #ifdef GCN_COMMAND_DISCONNECT_WIFI
-  mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_DISCONNECT_WIFI), 1);
+  mqtt_subscribe_topic(mqtt_get_in_topic_utf8(1, GCN_COMMAND_DISCONNECT_WIFI).c_str(), 1);
 #endif  // GCN_COMMAND_DISCONNECT_WIFI
 
 #ifdef GCN_COMMAND_REBOOT
-  mqtt_subscribe_topic(mqtt_get_sub_topic_utf8(GCN_MQTT_BROKER_IN_TOPIC, GCN_COMMAND_REBOOT), 1);
+  mqtt_subscribe_topic(mqtt_get_in_topic_utf8(1, GCN_COMMAND_REBOOT).c_str(), 1);
 #endif  // GCN_COMMAND_REBOOT
 
-  // TODO: publish metadata (manufacturer, chip, max_ram, freq, etc) as an exercise
+  // TODO: publish metadata (manufacturer, chip, max_ram, freq, etc) as persistent
 }
 
 void MainStateMachine::state_mqtt_connected_task() {
-  // int value = digitalRead(GCN_MONITORED_DIGITAL_PIN_A);
-  // Serial.print("pin ");
-  // Serial.print(GCN_MONITORED_DIGITAL_PIN_A);
-  // Serial.print(" value ");
-  // Serial.println(value);
-  // delay(1000);
-  // TODO: publish uptime, wifi uptime, mqtt uptime, sntp timestamp, ... periodically
+  // Flushing all monitors to MQTT once per loop (only if they have anything stored)
+  // This means at most N messages (1 per monitored pin) are sent to the broker each time
+  InterruptGpioMonitors::mqtt_flush_all_once(*this);
 
-  // TODO: publish changes in topics gcn/%u/out/pins/i with retain ?
+  // TODO: publish uptime, wifi uptime, mqtt uptime, sntp timestamp, ... periodically
+}
+
+void MainStateMachine::mqtt_flush_monitor_once(InterruptGpioMonitor &monitor) {
+  // treat this as a critical section
+  uint32_t timestamp;
+  uint8_t bit;
+  noInterrupts();
+  bool found = monitor.pop_back(timestamp, bit);
+  interrupts();
+
+  // return to normal concurrency
+  if (!found) {
+    return;
+  }
+
+  // send sample to broker
+  String pin_topic = mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_GPIO_MESSAGE, monitor.gpio_name.c_str());
+  char buf[sizeof("0 4294967295")];  // bit is guaranteed to be 0 or 1
+  snprintf(buf, sizeof(buf), "%i %lu", bit, timestamp);
+  mqtt_publish_topic_string(pin_topic.c_str(), buf, true);
 }
 
 void setup_mqtt() {
