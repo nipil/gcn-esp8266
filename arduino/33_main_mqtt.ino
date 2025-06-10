@@ -37,7 +37,7 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
   String topic(topic_utf8);
 
 #ifdef GCN_COMMAND_SYNCHRONIZE_SNTP
-  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_SYNCHRONIZE_SNTP)) {
+  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_SYNCHRONIZE_SNTP) && length > 0) {
     print_millis();
     Serial.println("Received 'synchronize SNTP' command");
     sntp_synchronize();
@@ -46,7 +46,7 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
 #endif  // GCN_COMMAND_SYNCHRONIZE_SNTP
 
 #ifdef GCN_COMMAND_DISCONNECT_MQTT
-  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_DISCONNECT_MQTT)) {
+  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_DISCONNECT_MQTT) && length > 0) {
     print_millis();
     Serial.println("Received 'disconnect MQTT' command");
     mqtt_client.disconnect();
@@ -56,7 +56,7 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
 #endif  // GCN_COMMAND_DISCONNECT_MQTT
 
 #ifdef GCN_COMMAND_DISCONNECT_WIFI
-  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_DISCONNECT_WIFI)) {
+  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_DISCONNECT_WIFI) && length > 0) {
     print_millis();
     Serial.println("Received 'disconnect wifi' command");
     mqtt_client.disconnect();
@@ -67,7 +67,7 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
 #endif  // GCN_COMMAND_DISCONNECT_WIFI
 
 #ifdef GCN_COMMAND_REBOOT
-  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_REBOOT)) {
+  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_REBOOT) && length > 0) {
     print_millis();
     Serial.println("Received 'reboot' command");
     mqtt_client.disconnect();
@@ -78,7 +78,7 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
 #endif  // GCN_COMMAND_REBOOT
 
 #ifdef GCN_COMMAND_SEND_METRICS
-  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_SEND_METRICS)) {
+  if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_SEND_METRICS) && length > 0) {
     print_millis();
     Serial.println("Received 'send metrics' command");
     send_metrics();
