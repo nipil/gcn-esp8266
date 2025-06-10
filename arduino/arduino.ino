@@ -40,7 +40,7 @@
 // Define how much caching is done on GPIO changes until they can be sent to MQTT (round-robin database)
 // each of these change will consume one byte of RAM, multiplied by the amount of monitored GPIO
 #define GCN_MONITOR_CHANGE_QUEUE_DEFAULT_SIZE_TWO_POW 4
-#define GCN_MONITOR_CHANGE_QUEUE_DEBOUNCE_MS 100
+#define GCN_MONITOR_CHANGE_QUEUE_DEBOUNCE_MS 10
 
 /**** MOST USED PARAMETERS ******************************************************************************* */
 
