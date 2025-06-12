@@ -341,7 +341,7 @@ bool MainStateMachine::send_metrics() {
   Serial.println("Sending metrics");
 
   char buf[sizeof("4294967295")];  // uint32_t
-
+#ifdef GCN_MQTT_BROKER_UPTIME_TOPIC
   do {  // uptime
     uint32_t tmp_ul = millis();
     snprintf(buf, sizeof(buf), "%u", tmp_ul);
@@ -372,9 +372,10 @@ bool MainStateMachine::send_metrics() {
     Serial.print("\tLocal unix timestamp : ");
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_UPTIME_TOPIC, GCN_MQTT_BROKER_UPTIME_TIMESTAMP).c_str(), buf, true);
-
   } while (false);
+#endif  // GCN_MQTT_BROKER_UPTIME_TOPIC
 
+#ifdef GCN_MQTT_BROKER_NETWORK_TOPIC
   do {  // WIFI
     String tmp_s = WiFi.localIP().toString();
     Serial.print("\tLocal IP : ");
@@ -423,7 +424,9 @@ bool MainStateMachine::send_metrics() {
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_NETWORK_TOPIC, GCN_MQTT_BROKER_NETWORK_RSSI).c_str(), buf, true);
   } while (false);
+#endif  // GCN_MQTT_BROKER_NETWORK_TOPIC
 
+#ifdef GCN_MQTT_BROKER_MQTT_TOPIC
   do {  // MQTT
     uint32_t tmp_ul = mqtt_count_sent_ok;
     snprintf(buf, sizeof(buf), "%u", tmp_ul);
@@ -467,6 +470,7 @@ bool MainStateMachine::send_metrics() {
     Serial.println(buf);
     success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_MQTT_TOPIC, GCN_MQTT_BROKER_MQTT_RECEIVED).c_str(), buf, true);
   } while (false);
+#endif  // GCN_MQTT_BROKER_MQTT_TOPIC
 
 #ifdef GCN_MQTT_BROKER_ESP8266_TOPIC
   do {  // esp8266
@@ -490,6 +494,16 @@ bool MainStateMachine::send_metrics() {
   } while (false);
 #endif  // GCN_MQTT_BROKER_ESP8266_TOPIC
 
+#ifdef GCN_MQTT_BROKER_BUFFER_TOTAL_DROPPED_ITEM
+  do {
+    uint32_t tmp_ul = GpioChangeBuffer::get_total_dropped_item_count();
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
+    Serial.print("\tBuffer total dropped items : ");
+    Serial.println(buf);
+    success &= mqtt_publish_topic_string(mqtt_get_out_topic_utf8(1, GCN_MQTT_BROKER_BUFFER_TOTAL_DROPPED_ITEM).c_str(), buf, true);
+  } while (false);
+#endif  // GCN_MQTT_BROKER_BUFFER_TOTAL_DROPPED_ITEM
+
   return success;
 }
 #endif  // defined(GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE) || defined(GCN_COMMAND_SEND_METRICS)
@@ -497,7 +511,7 @@ bool MainStateMachine::send_metrics() {
 void MainStateMachine::state_mqtt_connected_task() {
   // Flushing all monitors to MQTT once per loop (only if they have anything stored)
   // This means at most N messages (1 per monitored pin) are sent to the broker each time
-  InterruptGpioMonitors::mqtt_flush_all_once(*this);
+  flush_monitors();
 
 #ifdef GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE
   // Periodic metrics update
@@ -507,21 +521,15 @@ void MainStateMachine::state_mqtt_connected_task() {
 #endif  // GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE
 }
 
-void MainStateMachine::mqtt_flush_monitor_once(InterruptGpioMonitor &monitor) {
-  // treat this as a critical section
+void MainStateMachine::mqtt_flush_buffer_once(const char *gpio_name, GpioChangeBuffer &buffer) {
   uint32_t timestamp;
   uint8_t bit;
-  noInterrupts();
-  bool found = monitor.pop_back(timestamp, bit);
-  interrupts();
-
-  // return to normal concurrency
+  bool found = buffer.pop_back(timestamp, bit);  // interrupts disabled inside
   if (!found) {
     return;
   }
-
   // send sample to broker
-  String pin_topic = mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_GPIO_TOPIC, monitor.gpio_name);
+  String pin_topic = mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_GPIO_TOPIC, gpio_name);
   char buf[sizeof("0 4294967295")];  // bit is guaranteed to be 0 or 1, timestamp is an uint32_t
   snprintf(buf, sizeof(buf), "%i %u", bit, timestamp);
   mqtt_publish_topic_string(pin_topic.c_str(), buf, true);

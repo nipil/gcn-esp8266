@@ -1,91 +1,137 @@
 // GPIO CHANGE NOTIFIER (C) NIPIL 2025+
 
-InterruptGpioMonitor::InterruptGpioMonitor(const char* gpio_symbol_s, const uint8_t gpio_symbol_i)
-  : gpio_name(gpio_symbol_s), gpio_number(gpio_symbol_i), head(0), tail(0) {
+
+SinglePinTimeDebouncer::SinglePinTimeDebouncer(const char* gpio_name, const uint8_t gpio_number)
+  : gpio_name(gpio_name), gpio_number(gpio_number) {
 }
 
-void InterruptGpioMonitor::setup() {
-  print_millis();
-  Serial.print("Configure 'change' interrupt for monitored pin: name=");
+bool SinglePinTimeDebouncer::update(bool& new_value) {
+  bool current_value = digitalRead(gpio_number);
+  if (current_value == last_stable_value) {
+    return false;
+  }
+  last_stable_value = current_value;
+  unsigned long now_ms = millis();
+  if (now_ms - last_change_ms < GCN_CHANGE_BUFFER_DEBOUNCE_MS) {
+    return false;
+  }
+  last_change_ms = now_ms;
+  new_value = current_value;
+  return true;
+}
+
+void SinglePinTimeDebouncer::setup(InterruptServiceRoutine callback) {
+  Serial.print("Configure 'change' interrupt for single pin time debouncer : name=");
   Serial.print(gpio_name);
   Serial.print(" number=");
   Serial.println(gpio_number);
   pinMode(gpio_number, INPUT);
-  last_value = digitalRead(gpio_number);
+  last_stable_value = digitalRead(gpio_number);
   last_change_ms = millis();
+  attachInterrupt(digitalPinToInterrupt(gpio_number), callback, CHANGE);
 }
 
-void InterruptGpioMonitor::push_front(const uint32_t timestamp, const uint8_t bit) {
-  // debounce
-  if (bit == last_value) {
-    return;
-  }
-  last_value = bit;
-  unsigned long now_ms = millis();
-  if (now_ms - last_change_ms < GCN_MONITOR_CHANGE_QUEUE_DEBOUNCE_MS) {
-    return;
-  }
-  last_change_ms = now_ms;
+DualPinComplementDebouncer::DualPinComplementDebouncer(const char* gpio_name, const uint8_t gpio_number, const char* gpio_name_inverted, uint8_t gpio_number_inverted)
+  : gpio_name(gpio_name), gpio_number(gpio_number), gpio_name_inverted(gpio_name_inverted), gpio_number_inverted(gpio_number_inverted) {
+}
 
+bool DualPinComplementDebouncer::update(bool& new_value) {
+  bool current_value = digitalRead(gpio_number);
+  bool current_value_inverted = digitalRead(gpio_number_inverted);
+  if (!(current_value ^ current_value_inverted)) {
+    return false;  // invalid state, ignore
+  }
+  if (current_value == last_stable_value) {
+    return false;
+  }
+  new_value = last_stable_value = current_value;
+  return true;
+}
+
+void DualPinComplementDebouncer::setup(InterruptServiceRoutine callback) {
+  Serial.print("Configure 'change' interrupt for dual pin complement debouncer : normal=");
+  Serial.print(gpio_name);
+  Serial.print(" number=");
+  Serial.print(gpio_number);
+  Serial.print(" / inverted=");
+  Serial.print(gpio_name_inverted);
+  Serial.print(" number=");
+  Serial.println(gpio_number_inverted);
+  pinMode(gpio_number, INPUT);
+  pinMode(gpio_number_inverted, INPUT);
+  last_stable_value = digitalRead(gpio_number);
+  attachInterrupt(digitalPinToInterrupt(gpio_number), callback, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(gpio_number_inverted), callback, CHANGE);
+}
+
+GpioChangeBuffer::GpioChangeBuffer()
+  : head(0), tail(0) {
+}
+
+void GpioChangeBuffer::push_front(const uint32_t timestamp, const uint8_t bit) {
   // optimize and serialize
   uint32_t item = ((timestamp - timestamp_offset) & 0x7FFFFFFF) | ((bit & 0x01) << 31);
 
-  // store
-  unsigned int next = (head + 1) & mask;
-  if (next == tail) {
-    tail = (tail + 1) & mask;  // drop oldest element
-  }
-  ring[head] = item;
-  head = next;
-
-#ifdef GCN_DEBUG_MONITOR_PUSH
+#ifdef GCN_DEBUG_BUFFER_PUSH
   print_millis();
-  Serial.print("Monitor push_front: pin_number=");
-  Serial.print(gpio_number);
-  Serial.print(" bit=");
+  Serial.print("Buffer bit=");
   Serial.print(bit);
   Serial.print(" timestamp=");
   Serial.print(timestamp);
   Serial.print(" item=");
   Serial.println(item);
   print();
-#endif  // GCN_DEBUG_MONITOR_PUSH
+#endif  // GCN_DEBUG_BUFFER_PUSH
+
+  noInterrupts();
+
+  // store
+  unsigned int next = (head + 1) & mask;
+  if (next == tail) {
+    tail = (tail + 1) & mask;    // drop oldest element
+    total_dropped_item_count++;  // count dropped elements
+  }
+  ring[head] = item;
+  head = next;
+
+  interrupts();
 }
 
-bool InterruptGpioMonitor::pop_back(uint32_t& timestamp, uint8_t& bit) {
+bool GpioChangeBuffer::pop_back(uint32_t& timestamp, uint8_t& bit) {
   // check empty
   if (head == tail) {
     return false;
   }
 
+  noInterrupts();
+
   // retrieve and advance tail
   uint32_t item = ring[tail];
   tail = (tail + 1) & mask;
-
   // deserialize and rehydrate
   bit = (item >> 31) & 0x1;
   timestamp = (item & 0x7FFFFFFF) + timestamp_offset;
 
-#ifdef GCN_DEBUG_MONITOR_POP
+  interrupts();
+
+#ifdef GCN_DEBUG_BUFFER_POP
   print_millis();
-  Serial.print("Monitor pop_back: pin_number=");
-  Serial.print(gpio_number);
+  Serial.print("Buffer item=");
+  Serial.println(item);
   Serial.print(" bit=");
   Serial.print(bit);
   Serial.print(" timestamp=");
   Serial.print(timestamp);
-  Serial.print(" item=");
-  Serial.println(item);
   print();
-#endif  // GCN_DEBUG_MONITOR_POP
+#endif  // GCN_DEBUG_BUFFER_POP
+
   return true;
 }
 
-void InterruptGpioMonitor::print() {
+void GpioChangeBuffer::print() {
   char buf[sizeof("ffffffff")];
   print_millis();
-  Serial.print("Monitor STATE: pin_number=");
-  Serial.print(gpio_number);
+  Serial.print("ChangeBuffer STATE:");
   for (unsigned int i = 0; i <= mask; i++) {
     Serial.print(" ");
     snprintf(buf, sizeof(buf), "%08x", ring[i]);
@@ -97,138 +143,8 @@ void InterruptGpioMonitor::print() {
   Serial.println(tail);
 }
 
-// Used with GCN_MONITORED_DIGITAL_PIN_* in main arduino.ino
+uint32_t GpioChangeBuffer::get_total_dropped_item_count() {
+  return total_dropped_item_count;
+}
 
-#define STRINGIFY(x) #x
-#define TO_STRING(x) STRINGIFY(x)
-
-#define GCN_MONITORED_DIGITAL_PIN_MONITOR_DECLARATION(GPIO_NAME) \
-  static InterruptGpioMonitor gpio_changed_monitor_##GPIO_NAME
-
-#define GCN_MONITORED_DIGITAL_PIN_MONITOR_INITIALIZATION(GPIO_NAME) \
-  InterruptGpioMonitor InterruptGpioMonitors::gpio_changed_monitor_##GPIO_NAME(TO_STRING(GPIO_NAME), GPIO_NAME)
-
-#define GCN_MONITORED_DIGITAL_PIN_SETUP(GPIO_NAME) \
-  do { \
-    InterruptGpioMonitors::gpio_changed_monitor_##GPIO_NAME.setup(); \
-    attachInterrupt(digitalPinToInterrupt(GPIO_NAME), InterruptGpioMonitors::gpio_changed_isr_##GPIO_NAME, CHANGE); \
-  } while (0);
-
-#define GCN_MONITORED_DIGITAL_PIN_FLUSH(GPIO_NAME, TARGET) \
-  do { \
-    TARGET.mqtt_flush_monitor_once(InterruptGpioMonitors::gpio_changed_monitor_##GPIO_NAME); \
-  } while (0);
-
-#define GCN_MONITORED_DIGITAL_PIN_CHANGED_ISR(GPIO_NAME) \
-  IRAM_ATTR static void gpio_changed_isr_##GPIO_NAME() { \
-    uint8_t bit = digitalRead(GPIO_NAME); \
-    uint32_t timestamp = time(nullptr); \
-    InterruptGpioMonitors::gpio_changed_monitor_##GPIO_NAME.push_front(timestamp, bit); \
-  }
-
-class InterruptGpioMonitors {
-public:
-
-  static void setup() {
-#ifdef GCN_MONITORED_DIGITAL_PIN_A
-    GCN_MONITORED_DIGITAL_PIN_SETUP(GCN_MONITORED_DIGITAL_PIN_A);
-#endif  // GCN_MONITORED_DIGITAL_PIN_A
-#ifdef GCN_MONITORED_DIGITAL_PIN_B
-    GCN_MONITORED_DIGITAL_PIN_SETUP(GCN_MONITORED_DIGITAL_PIN_B);
-#endif  // GCN_MONITORED_DIGITAL_PIN_B
-#ifdef GCN_MONITORED_DIGITAL_PIN_C
-    GCN_MONITORED_DIGITAL_PIN_SETUP(GCN_MONITORED_DIGITAL_PIN_C);
-#endif  // GCN_MONITORED_DIGITAL_PIN_C
-#ifdef GCN_MONITORED_DIGITAL_PIN_D
-    GCN_MONITORED_DIGITAL_PIN_SETUP(GCN_MONITORED_DIGITAL_PIN_D);
-#endif  // GCN_MONITORED_DIGITAL_PIN_D
-#ifdef GCN_MONITORED_DIGITAL_PIN_E
-    GCN_MONITORED_DIGITAL_PIN_SETUP(GCN_MONITORED_DIGITAL_PIN_E);
-#endif  // GCN_MONITORED_DIGITAL_PIN_E
-#ifdef GCN_MONITORED_DIGITAL_PIN_F
-    GCN_MONITORED_DIGITAL_PIN_SETUP(GCN_MONITORED_DIGITAL_PIN_F);
-#endif  // GCN_MONITORED_DIGITAL_PIN_F
-  }
-
-  static void mqtt_flush_all_once(MainStateMachine& target) {
-#ifdef GCN_MONITORED_DIGITAL_PIN_A
-    GCN_MONITORED_DIGITAL_PIN_FLUSH(GCN_MONITORED_DIGITAL_PIN_A, target);
-#endif  // GCN_MONITORED_DIGITAL_PIN_A
-#ifdef GCN_MONITORED_DIGITAL_PIN_B
-    GCN_MONITORED_DIGITAL_PIN_FLUSH(GCN_MONITORED_DIGITAL_PIN_B, target);
-#endif  // GCN_MONITORED_DIGITAL_PIN_B
-#ifdef GCN_MONITORED_DIGITAL_PIN_C
-    GCN_MONITORED_DIGITAL_PIN_FLUSH(GCN_MONITORED_DIGITAL_PIN_C, target);
-#endif  // GCN_MONITORED_DIGITAL_PIN_C
-#ifdef GCN_MONITORED_DIGITAL_PIN_D
-    GCN_MONITORED_DIGITAL_PIN_FLUSH(GCN_MONITORED_DIGITAL_PIN_D, target);
-#endif  // GCN_MONITORED_DIGITAL_PIN_D
-#ifdef GCN_MONITORED_DIGITAL_PIN_E
-    GCN_MONITORED_DIGITAL_PIN_FLUSH(GCN_MONITORED_DIGITAL_PIN_E, target);
-#endif  // GCN_MONITORED_DIGITAL_PIN_E
-#ifdef GCN_MONITORED_DIGITAL_PIN_F
-    GCN_MONITORED_DIGITAL_PIN_FLUSH(GCN_MONITORED_DIGITAL_PIN_F, target);
-#endif  // GCN_MONITORED_DIGITAL_PIN_F
-  }
-
-// Generate one interrupt service routing per monitored GPIO
-#ifdef GCN_MONITORED_DIGITAL_PIN_A
-  GCN_MONITORED_DIGITAL_PIN_CHANGED_ISR(GCN_MONITORED_DIGITAL_PIN_A)
-#endif  // GCN_MONITORED_DIGITAL_PIN_A
-#ifdef GCN_MONITORED_DIGITAL_PIN_B
-  GCN_MONITORED_DIGITAL_PIN_CHANGED_ISR(GCN_MONITORED_DIGITAL_PIN_B)
-#endif  // GCN_MONITORED_DIGITAL_PIN_B
-#ifdef GCN_MONITORED_DIGITAL_PIN_C
-  GCN_MONITORED_DIGITAL_PIN_CHANGED_ISR(GCN_MONITORED_DIGITAL_PIN_C)
-#endif  // GCN_MONITORED_DIGITAL_PIN_C
-#ifdef GCN_MONITORED_DIGITAL_PIN_D
-  GCN_MONITORED_DIGITAL_PIN_CHANGED_ISR(GCN_MONITORED_DIGITAL_PIN_D)
-#endif  // GCN_MONITORED_DIGITAL_PIN_D
-#ifdef GCN_MONITORED_DIGITAL_PIN_E
-  GCN_MONITORED_DIGITAL_PIN_CHANGED_ISR(GCN_MONITORED_DIGITAL_PIN_E)
-#endif  // GCN_MONITORED_DIGITAL_PIN_E
-#ifdef GCN_MONITORED_DIGITAL_PIN_F
-  GCN_MONITORED_DIGITAL_PIN_CHANGED_ISR(GCN_MONITORED_DIGITAL_PIN_F)
-#endif  // GCN_MONITORED_DIGITAL_PIN_F
-
-private:
-// Declare one monitor per monitored GPIO
-#ifdef GCN_MONITORED_DIGITAL_PIN_A
-  GCN_MONITORED_DIGITAL_PIN_MONITOR_DECLARATION(GCN_MONITORED_DIGITAL_PIN_A);
-#endif  // GCN_MONITORED_DIGITAL_PIN_A
-#ifdef GCN_MONITORED_DIGITAL_PIN_B
-  GCN_MONITORED_DIGITAL_PIN_MONITOR_DECLARATION(GCN_MONITORED_DIGITAL_PIN_B);
-#endif  // GCN_MONITORED_DIGITAL_PIN_B
-#ifdef GCN_MONITORED_DIGITAL_PIN_C
-  GCN_MONITORED_DIGITAL_PIN_MONITOR_DECLARATION(GCN_MONITORED_DIGITAL_PIN_C);
-#endif  // GCN_MONITORED_DIGITAL_PIN_C
-#ifdef GCN_MONITORED_DIGITAL_PIN_D
-  GCN_MONITORED_DIGITAL_PIN_MONITOR_DECLARATION(GCN_MONITORED_DIGITAL_PIN_D);
-#endif  // GCN_MONITORED_DIGITAL_PIN_D
-#ifdef GCN_MONITORED_DIGITAL_PIN_E
-  GCN_MONITORED_DIGITAL_PIN_MONITOR_DECLARATION(GCN_MONITORED_DIGITAL_PIN_E);
-#endif  // GCN_MONITORED_DIGITAL_PIN_E
-#ifdef GCN_MONITORED_DIGITAL_PIN_F
-  GCN_MONITORED_DIGITAL_PIN_MONITOR_DECLARATION(GCN_MONITORED_DIGITAL_PIN_F);
-#endif  // GCN_MONITORED_DIGITAL_PIN_F
-};
-
-// Initialize each monitor
-#ifdef GCN_MONITORED_DIGITAL_PIN_A
-GCN_MONITORED_DIGITAL_PIN_MONITOR_INITIALIZATION(GCN_MONITORED_DIGITAL_PIN_A);
-#endif  // GCN_MONITORED_DIGITAL_PIN_A
-#ifdef GCN_MONITORED_DIGITAL_PIN_B
-GCN_MONITORED_DIGITAL_PIN_MONITOR_INITIALIZATION(GCN_MONITORED_DIGITAL_PIN_B);
-#endif  // GCN_MONITORED_DIGITAL_PIN_B
-#ifdef GCN_MONITORED_DIGITAL_PIN_C
-GCN_MONITORED_DIGITAL_PIN_MONITOR_INITIALIZATION(GCN_MONITORED_DIGITAL_PIN_C);
-#endif  // GCN_MONITORED_DIGITAL_PIN_C
-#ifdef GCN_MONITORED_DIGITAL_PIN_D
-GCN_MONITORED_DIGITAL_PIN_MONITOR_INITIALIZATION(GCN_MONITORED_DIGITAL_PIN_D);
-#endif  // GCN_MONITORED_DIGITAL_PIN_D
-#ifdef GCN_MONITORED_DIGITAL_PIN_E
-GCN_MONITORED_DIGITAL_PIN_MONITOR_INITIALIZATION(GCN_MONITORED_DIGITAL_PIN_E);
-#endif  // GCN_MONITORED_DIGITAL_PIN_E
-#ifdef GCN_MONITORED_DIGITAL_PIN_F
-GCN_MONITORED_DIGITAL_PIN_MONITOR_INITIALIZATION(GCN_MONITORED_DIGITAL_PIN_F);
-#endif  // GCN_MONITORED_DIGITAL_PIN_F
+uint32_t GpioChangeBuffer::total_dropped_item_count = 0;

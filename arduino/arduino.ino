@@ -23,13 +23,11 @@
 #define GCN_MQTT_BROKER_USER_NAME_UTF8 NULL
 #define GCN_MQTT_BROKER_PASSWORD NULL
 
-// GPIO pins to be monitored (IMPORTANT: BY NAME !!)
+// GPIO pins to be monitored :
+// - a single pin for a time debouncer
+// - two pins for a complement debouncer
 #define GCN_MONITORED_DIGITAL_PIN_A D1
-// #define GCN_MONITORED_DIGITAL_PIN_B D...
-// #define GCN_MONITORED_DIGITAL_PIN_C D...
-// #define GCN_MONITORED_DIGITAL_PIN_D D...
-// #define GCN_MONITORED_DIGITAL_PIN_E D...
-// #define GCN_MONITORED_DIGITAL_PIN_F D...
+// #define GCN_MONITORED_DIGITAL_PIN_A_INVERTED D2
 
 /**** MINOR PARAMETERS ******************************************************************************* */
 
@@ -39,8 +37,8 @@
 
 // Define how much caching is done on GPIO changes until they can be sent to MQTT (round-robin database)
 // each of these change will consume one byte of RAM, multiplied by the amount of monitored GPIO
-#define GCN_MONITOR_CHANGE_QUEUE_DEFAULT_SIZE_TWO_POW 4
-#define GCN_MONITOR_CHANGE_QUEUE_DEBOUNCE_MS 10
+#define GCN_CHANGE_QUEUE_SIZE_TWO_POW 4
+#define GCN_CHANGE_BUFFER_DEBOUNCE_MS 10
 
 /**** MOST USED PARAMETERS ******************************************************************************* */
 
@@ -97,8 +95,9 @@
 #define GCN_MQTT_BROKER_ESP8266_TOPIC_FLASH_CHIP_SPEED_HZ "flash_chip_speed_hz"
 #define GCN_MQTT_BROKER_ESP8266_TOPIC_CHECK_FLASH_CRC "check_flash_crc"
 
-#ifdef GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE
 // MQTT periodic metrics
+#ifdef GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE
+#define GCN_MQTT_BROKER_BUFFER_TOTAL_DROPPED_ITEM "buffer_total_dropped_item"
 #define GCN_MQTT_BROKER_MQTT_TOPIC "mqtt"
 #define GCN_MQTT_BROKER_MQTT_SENT_OK "sent_ok"
 #define GCN_MQTT_BROKER_MQTT_SENT_ERROR "sent_error"
@@ -138,8 +137,8 @@
 // #define GCN_DEBUG_MAIN_STATE_MACHINE
 // #define GCN_DEBUG_LIGHT_STATE_MACHINE
 // #define GCN_DEBUG_ARDUINO_OUTPUT_PIN
-// #define GCN_DEBUG_MONITOR_PUSH
-// #define GCN_DEBUG_MONITOR_POP
+// #define GCN_DEBUG_BUFFER_PUSH
+// #define GCN_DEBUG_BUFFER_POP
 // #define GCN_DEBUG_MQTT_PUBLISH
 // #define GCN_DEBUG_MQTT_SUBSCRIBE
 // #define GCN_DEBUG_MQTT_RECEIVED

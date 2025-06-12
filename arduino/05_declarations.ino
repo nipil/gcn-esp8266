@@ -72,25 +72,51 @@ private:
   unsigned long millis_since_last_event();
 };
 
-// Used to monitor GPIO changes and buffer them (as possible !) until they are sent to MQTT
-class InterruptGpioMonitor {
+typedef void (*InterruptServiceRoutine)();
+
+class PinDebouncer {
+public:
+  virtual bool update(bool &new_value) = 0;
+  virtual void setup(InterruptServiceRoutine callback) = 0;
+};
+
+class SinglePinTimeDebouncer : public PinDebouncer {
 public:
   const char *gpio_name;
   const uint8_t gpio_number;
+  SinglePinTimeDebouncer(const char *gpio_name, const uint8_t gpio_number);
+  bool update(bool &new_value);
+  void setup(InterruptServiceRoutine callback);
+private:
+  bool last_stable_value;
+  uint32_t last_change_ms;
+};
 
-  InterruptGpioMonitor(const char *gpio_symbol_s, const uint8_t gpio_symbol_i);
-  void setup();
+class DualPinComplementDebouncer : public PinDebouncer {
+public:
+  const char *gpio_name;
+  const uint8_t gpio_number;
+  const char *gpio_name_inverted;
+  const uint8_t gpio_number_inverted;
+  DualPinComplementDebouncer(const char *gpio_name, const uint8_t gpio_number, const char *gpio_name_inverted, uint8_t gpio_number_inverted);
+  bool update(bool &new_value);
+  void setup(InterruptServiceRoutine callback);
+private:
+  bool last_stable_value;
+};
+
+// Used to monitor GPIO changes and buffer them (as possible !) until they are sent to MQTT
+class GpioChangeBuffer {
+public:
+  GpioChangeBuffer();
   void push_front(const uint32_t timestamp, const uint8_t bit);
   bool pop_back(uint32_t &timestamp, uint8_t &bit);
   void print();
+  static uint32_t get_total_dropped_item_count();
 
 private:
-  // debounce inputs
-  uint8_t last_value;
-  uint32_t last_change_ms;
-
   // MUST be a power of 2, so that the ring can be optimized for and'ing
-  static const unsigned int mask = (1 << GCN_MONITOR_CHANGE_QUEUE_DEFAULT_SIZE_TWO_POW) - 1;
+  static const unsigned int mask = (1 << GCN_CHANGE_QUEUE_SIZE_TWO_POW) - 1;
 
   // i optimize the entry size by storing the GPIO value (1 bit) in MSB
   // which would leave max 'storable' timestamp to 2147483647, ie Tue Jan 19 2038 03:14:07 GMT+0000
@@ -101,6 +127,8 @@ private:
   uint32_t ring[mask + 1];
   unsigned int head;
   unsigned int tail;
+
+  static uint32_t total_dropped_item_count;
 };
 
 class MainStateMachine {
@@ -110,7 +138,6 @@ public:
   void setup();
   void update();
   void mqtt_callback(char *topic, byte *payload, unsigned int length);
-  void mqtt_flush_monitor_once(InterruptGpioMonitor &monitor);
 
 private:
   typedef enum {
@@ -182,27 +209,13 @@ private:
   bool is_sntp_connected();
   bool is_mqtt_connected();
   void sntp_synchronize();
+  void flush_monitors();
   bool mqtt_publish_topic_string(const char *topic_utf8, const char *message, bool retain);
   bool mqtt_subscribe_topic(const char *topic_utf8, int qos);
   bool mqtt_publish_hardware_constants();
+  void mqtt_flush_buffer_once(const char *gpio_name, GpioChangeBuffer &buffer);
   String mqtt_get_client_id_utf8();
   String mqtt_get_will_topic_utf8();
   String mqtt_get_in_topic_utf8(int n, ... /* const char * */);
   String mqtt_get_out_topic_utf8(int n, ... /* const char * */);
 };
-
-// Dependency injection
-
-#if GCN_MQTT_BROKER_IS_SECURE
-BearSSL::X509List ca_certs;
-BearSSL::Session tls_session;
-WiFiClientSecure wifi_client;
-#else
-WiFiClient wifi_client;
-#endif
-PubSubClient mqtt_client(GCN_MQTT_BROKER_DNS_NAME, GCN_MQTT_BROKER_TCP_PORT, main_state_machine_mqtt_callback, wifi_client);
-
-ArduinoOutputPin status_pin(GCN_STATUS_LED_PIN, GCN_STATUS_LED_INVERT);
-LightStateMachine light_state_machine(status_pin, GCN_LIGHT_SHORT_DURATION_MS, GCN_LIGHT_LONG_DURATION_MS);
-
-MainStateMachine main_state_machine(mqtt_client, light_state_machine);

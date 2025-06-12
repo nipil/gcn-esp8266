@@ -14,8 +14,8 @@ void setup() {
   setup_tls();
 #endif
   setup_mqtt();
+  setup_monitors();
   main_state_machine.setup();
-  InterruptGpioMonitors::setup();
 }
 
 void loop() {
