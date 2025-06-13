@@ -7,15 +7,34 @@ SinglePinTimeDebouncer::SinglePinTimeDebouncer(const char* gpio_name, const uint
 
 bool SinglePinTimeDebouncer::update(bool& new_value) {
   bool current_value = digitalRead(gpio_number);
+
+#ifdef GCN_DEBUG_DEBOUNCER_SINGLE
+  print_millis();
+  Serial.print("SingleDebouncer ");
+  Serial.print(current_value);
+  Serial.print(" ");
+#endif  // GCN_DEBUG_DEBOUNCER_SINGLE
+
   if (current_value == last_stable_value) {
+#ifdef GCN_DEBUG_DEBOUNCER_SINGLE
+    Serial.println("same");
+#endif  // GCN_DEBUG_DEBOUNCER_SINGLE
     return false;
   }
+
   last_stable_value = current_value;
   unsigned long now_ms = millis();
   if (now_ms - last_change_ms < GCN_CHANGE_BUFFER_DEBOUNCE_MS) {
+#ifdef GCN_DEBUG_DEBOUNCER_SINGLE
+    Serial.println("unstable");
+#endif  // GCN_DEBUG_DEBOUNCER_SINGLE
     return false;
   }
+
   last_change_ms = now_ms;
+#ifdef GCN_DEBUG_DEBOUNCER_SINGLE
+  Serial.println(last_change_ms);
+#endif  // GCN_DEBUG_DEBOUNCER_SINGLE
   new_value = current_value;
   return true;
 }
@@ -38,13 +57,35 @@ DualPinComplementDebouncer::DualPinComplementDebouncer(const char* gpio_name, co
 bool DualPinComplementDebouncer::update(bool& new_value) {
   bool current_value = digitalRead(gpio_number);
   bool current_value_inverted = digitalRead(gpio_number_inverted);
+
+#ifdef GCN_DEBUG_DEBOUNCER_DUAL
+  print_millis();
+  Serial.print("DualDebouncer ");
+  Serial.print(current_value);
+  Serial.print(" ");
+  Serial.print(current_value_inverted);
+  Serial.print(" ");
+#endif  // GCN_DEBUG_DEBOUNCER_DUAL
+
+  // invalid state, ignore
   if (!(current_value ^ current_value_inverted)) {
-    return false;  // invalid state, ignore
-  }
-  if (current_value == last_stable_value) {
+#ifdef GCN_DEBUG_DEBOUNCER_DUAL
+    Serial.println("invalid");
+#endif  // GCN_DEBUG_DEBOUNCER_DUAL
     return false;
   }
+
+  if (current_value == last_stable_value) {
+#ifdef GCN_DEBUG_DEBOUNCER_DUAL
+    Serial.println("same");
+#endif  // GCN_DEBUG_DEBOUNCER_DUAL
+    return false;
+  }
+
   new_value = last_stable_value = current_value;
+#ifdef GCN_DEBUG_DEBOUNCER_DUAL
+  Serial.println(new_value);
+#endif  // GCN_DEBUG_DEBOUNCER_DUAL
   return true;
 }
 
@@ -74,7 +115,7 @@ void GpioChangeBuffer::push_front(const uint32_t timestamp, const uint8_t bit) {
 
 #ifdef GCN_DEBUG_BUFFER_PUSH
   print_millis();
-  Serial.print("Buffer bit=");
+  Serial.print("BufferPush bit=");
   Serial.print(bit);
   Serial.print(" timestamp=");
   Serial.print(timestamp);
@@ -116,8 +157,8 @@ bool GpioChangeBuffer::pop_back(uint32_t& timestamp, uint8_t& bit) {
 
 #ifdef GCN_DEBUG_BUFFER_POP
   print_millis();
-  Serial.print("Buffer item=");
-  Serial.println(item);
+  Serial.print("BufferPop item=");
+  Serial.print(item);
   Serial.print(" bit=");
   Serial.print(bit);
   Serial.print(" timestamp=");
