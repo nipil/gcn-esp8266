@@ -21,27 +21,53 @@ MainStateMachine main_state_machine(mqtt_client, light_state_machine);
 /** PER PIN : PIN "A" ************************************************************************************/
 
 #ifdef GCN_MONITORED_DIGITAL_PIN_A
+
 GpioChangeBuffer gpio_changed_buffer_pin_a;
+
 #ifdef GCN_MONITORED_DIGITAL_PIN_A_INVERTED
 DualPinComplementDebouncer input_debouncer_pin_a(TO_STRING(GCN_MONITORED_DIGITAL_PIN_A), GCN_MONITORED_DIGITAL_PIN_A, TO_STRING(GCN_MONITORED_DIGITAL_PIN_A_INVERTED), GCN_MONITORED_DIGITAL_PIN_A_INVERTED);
 #else
 SinglePinTimeDebouncer input_debouncer_pin_a(TO_STRING(GCN_MONITORED_DIGITAL_PIN_A), GCN_MONITORED_DIGITAL_PIN_A);
 #endif  // GCN_MONITORED_DIGITAL_PIN_A_INVERTED
-IRAM_ATTR static void gpio_changed_isr_pin_a() {
+
+static void gpio_changed_pin_a() {
+
+#ifdef GCN_DEBUG_DEBOUNCER_ISR
+  Serial.print("gpio_changed_pin_a called ");
+#endif  // GCN_DEBUG_DEBOUNCER_ISR
+
   bool new_bit;
   if (!input_debouncer_pin_a.update(new_bit)) {
+#ifdef GCN_DEBUG_DEBOUNCER_ISR
+    Serial.println("no_update");
+#endif  // GCN_DEBUG_DEBOUNCER_ISR
     return;
   }
+
   uint32_t timestamp = time(nullptr);
-  gpio_changed_buffer_pin_a.push_front(timestamp, new_bit);  // interrupts disabled inside
+#ifdef GCN_DEBUG_DEBOUNCER_ISR
+  Serial.println(timestamp);
+#endif  // GCN_DEBUG_DEBOUNCER_ISR
+
+  // interrupts disabled inside
+  gpio_changed_buffer_pin_a.push_front(timestamp, new_bit);
 }
+
+IRAM_ATTR static void gpio_changed_isr_pin_a() {
+  gpio_changed_pin_a();
+}
+
 #endif  // GCN_MONITORED_DIGITAL_PIN_A
 
 /** ALL PINS **/
 
 void setup_monitors() {
 #ifdef GCN_MONITORED_DIGITAL_PIN_A
+#ifdef GCN_MONITORED_DIGITAL_PIN_A_INVERTED
   input_debouncer_pin_a.setup(gpio_changed_isr_pin_a);
+#else
+  input_debouncer_pin_a.setup(gpio_changed_isr_pin_a);
+#endif  // GCN_MONITORED_DIGITAL_PIN_A_INVERTED
 #endif  // GCN_MONITORED_DIGITAL_PIN_A
 }
 
