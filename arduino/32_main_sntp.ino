@@ -58,12 +58,14 @@ void MainStateMachine::state_sntp_connected_task() {
 
   print_millis();
   Serial.println("Successfully connected to MQTT broker");
-
-  // publish the list of monitored pins, so that the managing app can cleanup obsolete persistant gpio messages
-  mqtt_publish_topic_string(mqtt_get_out_topic_utf8(2, GCN_MQTT_BROKER_OUT_TOPIC, GCN_MQTT_BROKER_MONITORED_PINS).c_str(), MONITORED_PINS_MESSAGE, true);
-
   // inform the managing app that we are actually online
   mqtt_publish_topic_string(mqtt_will_topic_utf8.c_str(), GCN_MQTT_BROKER_BORN_MESSAGE, true);
+
+  print_millis();
+  Serial.print("Provide monitored pins inventory for consumers: ");
+  Serial.println(MONITORED_PINS_MESSAGE);
+  // publish the list of monitored pins, so that the managing app can cleanup obsolete persistant gpio messages
+  mqtt_publish_topic_string(mqtt_get_out_topic_utf8(1, GCN_MQTT_BROKER_MONITORED_PINS).c_str(), MONITORED_PINS_MESSAGE, true);
 
   set_state(MAIN_STATE_MQTT_CONNECTED);
 }
