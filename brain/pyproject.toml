@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gcn_manager"
+version = "0.0.1"
+authors = [{ name = "nipil", email = "nipil@users.noreply.github.com" },
+]
+description = "Central manager for mqtt-based gpio-change-notifier Arduino project"
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = ["Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+
+[project.urls]
+Homepage = "https://github.com/nipil/gcn-esp8266"
+Issues = "https://github.com/nipil/gcn-esp8266/issues"
