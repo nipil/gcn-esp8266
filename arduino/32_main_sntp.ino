@@ -63,9 +63,12 @@ void MainStateMachine::state_sntp_connected_task() {
 
   print_millis();
   Serial.print("Provide monitored pins inventory for consumers: ");
-  Serial.println(MONITORED_PINS_MESSAGE);
+  Serial.println(MONITORED_GPIO_MESSAGE);
   // publish the list of monitored pins, so that the managing app can cleanup obsolete persistant gpio messages
-  mqtt_publish_topic_string(mqtt_get_out_topic_utf8(1, GCN_MQTT_BROKER_MONITORED_PINS).c_str(), MONITORED_PINS_MESSAGE, true);
+  mqtt_publish_topic_string(mqtt_get_out_topic_utf8(1, GCN_MQTT_BROKER_MONITORED_GPIO).c_str(), MONITORED_GPIO_MESSAGE, true);
+
+  // do not wait for the first change, inform about our state right away
+  mqtt_queue_initial_values();
 
   set_state(MAIN_STATE_MQTT_CONNECTED);
 }

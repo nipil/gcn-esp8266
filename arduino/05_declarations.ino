@@ -78,6 +78,9 @@ class PinDebouncer {
 public:
   virtual bool update(bool &new_value) = 0;
   virtual void setup(InterruptServiceRoutine callback) = 0;
+  bool get_last_stable_value();
+protected:
+  bool last_stable_value;
 };
 
 class SinglePinTimeDebouncer : public PinDebouncer {
@@ -88,7 +91,6 @@ public:
   bool update(bool &new_value);
   void setup(InterruptServiceRoutine callback);
 private:
-  bool last_stable_value;
   uint32_t last_change_ms;
 };
 
@@ -101,8 +103,6 @@ public:
   DualPinComplementDebouncer(const char *gpio_name, const uint8_t gpio_number, const char *gpio_name_inverted, uint8_t gpio_number_inverted);
   bool update(bool &new_value);
   void setup(InterruptServiceRoutine callback);
-private:
-  bool last_stable_value;
 };
 
 // Used to monitor GPIO changes and buffer them (as possible !) until they are sent to MQTT
@@ -161,6 +161,7 @@ private:
   unsigned long last_sntp_begin_ms;
   unsigned long last_mqtt_begin_ms;
   unsigned long next_mqtt_retry_ms;
+  unsigned long last_heartbeat_ms;
 
   unsigned long mqtt_count_sent_ok;
   unsigned long mqtt_count_sent_error;
@@ -213,7 +214,9 @@ private:
   bool mqtt_publish_topic_string(const char *topic_utf8, const char *message, bool retain);
   bool mqtt_subscribe_topic(const char *topic_utf8, int qos);
   bool mqtt_publish_hardware_constants();
+  void mqtt_queue_initial_values();
   void mqtt_flush_buffer_once(const char *gpio_name, GpioChangeBuffer &buffer);
+  void mqtt_disconnect_properly();
   String mqtt_get_client_id_utf8();
   String mqtt_get_will_topic_utf8();
   String mqtt_get_in_topic_utf8(int n, ... /* const char * */);

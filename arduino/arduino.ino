@@ -75,8 +75,10 @@
 #define GCN_MQTT_BROKER_BORN_MESSAGE "online"
 #define GCN_MQTT_BROKER_CLEAN_SESSION true
 #define GCN_MQTT_BROKER_GPIO_TOPIC "gpio"
-#define GCN_MQTT_BROKER_MONITORED_PINS "monitored_pins"
+#define GCN_MQTT_BROKER_MONITORED_GPIO "monitored_gpio"
 #define GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE 10
+#define GCN_MQTT_BROKER_HEARTBEAT_TOPIC "heartbeat"
+#define GCN_MQTT_BROKER_HEARTBEAT_UPDATE_INTERVAL_SECOND 30
 
 // MQTT hardware data
 #define GCN_MQTT_BROKER_HW_TOPIC "hardware"
@@ -146,6 +148,7 @@
 // #define GCN_DEBUG_MQTT_PUBLISH
 // #define GCN_DEBUG_MQTT_SUBSCRIBE
 // #define GCN_DEBUG_MQTT_RECEIVED
+// #define GCN_DEBUG_MQTT_HEARTBEAT
 
 // Optional input commands (comment to disable)
 #define GCN_COMMAND_REBOOT "reboot"

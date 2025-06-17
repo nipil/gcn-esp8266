@@ -1,5 +1,8 @@
 // GPIO CHANGE NOTIFIER (C) NIPIL 2025+
 
+bool PinDebouncer::get_last_stable_value() {
+  return last_stable_value;
+}
 
 SinglePinTimeDebouncer::SinglePinTimeDebouncer(const char* gpio_name, const uint8_t gpio_number)
   : gpio_name(gpio_name), gpio_number(gpio_number) {

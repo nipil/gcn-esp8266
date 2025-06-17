@@ -49,7 +49,7 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
   if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_DISCONNECT_MQTT) && length > 0) {
     print_millis();
     Serial.println("Received 'disconnect MQTT' command");
-    mqtt_client.disconnect();
+    mqtt_disconnect_properly();
     set_state(MAIN_STATE_SNTP_CONNECTED);
     return;
   }
@@ -59,7 +59,7 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
   if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_DISCONNECT_WIFI) && length > 0) {
     print_millis();
     Serial.println("Received 'disconnect wifi' command");
-    mqtt_client.disconnect();
+    mqtt_disconnect_properly();
     WiFi.disconnect();
     set_state(MAIN_STATE_WIFI_NOT_CONNECTED);
     return;
@@ -70,7 +70,7 @@ void MainStateMachine::mqtt_callback(char *topic_utf8, byte *payload, unsigned i
   if (topic == mqtt_get_in_topic_utf8(1, GCN_COMMAND_REBOOT) && length > 0) {
     print_millis();
     Serial.println("Received 'reboot' command");
-    mqtt_client.disconnect();
+    mqtt_disconnect_properly();
     WiFi.disconnect();
     set_state(MAIN_STATE_REBOOT);
     return;
@@ -513,6 +513,20 @@ void MainStateMachine::state_mqtt_connected_task() {
   // This means at most N messages (1 per monitored pin) are sent to the broker each time
   flush_monitors();
 
+  // Sending heartbeats, not for MQTT session keepalive, but for detecting age of last connection
+  if (millis() - last_heartbeat_ms > GCN_MQTT_BROKER_HEARTBEAT_UPDATE_INTERVAL_SECOND * 1000 || last_heartbeat_ms == 0) {
+    last_heartbeat_ms = millis();
+    uint32_t tmp_ul = time(nullptr);
+    char buf[sizeof("4294967295")];  // uint32_t
+    snprintf(buf, sizeof(buf), "%u", tmp_ul);
+#ifdef GCN_DEBUG_MQTT_HEARTBEAT
+    print_millis();
+    Serial.print("Sending heartbeat with timestamp ");
+    Serial.println(buf);
+#endif  // GCN_DEBUG_MQTT_HEARTBEAT
+    mqtt_publish_topic_string(mqtt_get_out_topic_utf8(1, GCN_MQTT_BROKER_HEARTBEAT_TOPIC).c_str(), buf, true);
+  }
+
 #ifdef GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE
   // Periodic metrics update
   if (millis() - last_metrics_begin_ms > GCN_MQTT_BROKER_PERIODIC_UPDATE_INTERVAL_MINUTE * 60 * 1000 || last_metrics_begin_ms == 0) {
@@ -533,6 +547,16 @@ void MainStateMachine::mqtt_flush_buffer_once(const char *gpio_name, GpioChangeB
   char buf[sizeof("0 4294967295")];  // bit is guaranteed to be 0 or 1, timestamp is an uint32_t
   snprintf(buf, sizeof(buf), "%i %u", bit, timestamp);
   mqtt_publish_topic_string(pin_topic.c_str(), buf, true);
+}
+
+void MainStateMachine::mqtt_disconnect_properly() {
+  // disconnecting properly cancels the automatic use of will message
+  // so that induces more work to setup the "offline" state than doing it "uncleanly"
+  // howerver this is the "correct" way to behave, so do it proper.
+  // SO, deliberately send the will message, to inform that we are actually going offline !
+  mqtt_publish_topic_string(mqtt_get_will_topic_utf8().c_str(), GCN_MQTT_BROKER_WILL_MESSAGE, true);
+  // as sending is synchronous with this library, no need to call for loop to flush it, and we can disconnect now
+  mqtt_client.disconnect();
 }
 
 void setup_mqtt() {

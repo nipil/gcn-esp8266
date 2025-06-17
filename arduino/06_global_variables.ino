@@ -71,13 +71,26 @@ void setup_monitors() {
 #endif  // GCN_MONITORED_DIGITAL_PIN_A
 }
 
+void MainStateMachine::mqtt_queue_initial_values() {
+  bool value;
+  uint32_t timestamp = time(nullptr);
+#ifdef GCN_MONITORED_DIGITAL_PIN_A
+  value = input_debouncer_pin_a.get_last_stable_value();
+  print_millis();
+  Serial.print("Queuing initial GPIO value ");
+  Serial.print(value);
+  Serial.println(" for " TO_STRING(GCN_MONITORED_DIGITAL_PIN_A));
+  gpio_changed_buffer_pin_a.push_front(timestamp, value);
+#endif  // GCN_MONITORED_DIGITAL_PIN_A
+}
+
 void MainStateMachine::flush_monitors() {
 #ifdef GCN_MONITORED_DIGITAL_PIN_A
   mqtt_flush_buffer_once(input_debouncer_pin_a.gpio_name, gpio_changed_buffer_pin_a);
 #endif  // GCN_MONITORED_DIGITAL_PIN_A
 }
 
-const char* MONITORED_PINS_MESSAGE =
+const char* MONITORED_GPIO_MESSAGE =
 #ifdef GCN_MONITORED_DIGITAL_PIN_A
   "" TO_STRING(GCN_MONITORED_DIGITAL_PIN_A)
 #endif  // GCN_MONITORED_DIGITAL_PIN_A
