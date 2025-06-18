@@ -1,67 +1,38 @@
 #!/usr/bin/env python3
 
 import argparse
+import asyncio
 import logging
 import os
-import queue
-import random
-import ssl
 import sys
-import time
-
-import paho.mqtt.client
 
 from gcn_manager import AppError, get_env
+from gcn_manager.app import App
 from gcn_manager.constants import *
-from gcn_manager.mqtt import MqttApp
 
 
-# The callback for when the client receives a CONNACK response from the server.
-def on_connect(client, userdata, flags, reason_code, properties):
-    print(
-        f"Connected with result code {reason_code}")  # Subscribing in on_connect() means that if we lose the connection and  # reconnect then subscriptions will be renewed.  # client.subscribe("$SYS/#")
+def main() -> None:
+    async def run_loop_forever(app: App) -> None:
+        while True:
+            await app.loop()
+            await asyncio.sleep(args.idle_loop_sleep)
 
+    def run(args_: argparse.Namespace) -> None:
+        with App(args_) as app:  # automatic shutdown on clean exit
+            try:
+                asyncio.run(run_loop_forever(app))
+            except KeyboardInterrupt:
+                pass
 
-# The callback for when a PUBLISH message is received from the server.
-def on_message(client, userdata, msg):
-    print(msg.topic + " " + str(msg.payload))
-
-
-def run(args: argparse.Namespace):
-    random.seed()
-    in_queue = queue.Queue(maxsize=args.mqtt_in_queue_max_size)
-    mqtt_client_id = f"{MQTT_APP}_manager_{random.randbytes(args.mqtt_client_id_random_bytes).hex().lower()}"
-    paho_mqtt_client = paho.mqtt.client.Client(callback_api_version=paho.mqtt.client.CallbackAPIVersion.VERSION2,
-                                               clean_session=True, client_id=mqtt_client_id,
-                                               protocol=paho.mqtt.client.MQTTv311, transport=args.mqtt_transport,
-                                               reconnect_on_failure=args.mqtt_reconnect)
-    paho_mqtt_client.connect_timeout = args.mqtt_connect_timeout
-    paho_mqtt_client.tls_set(tls_version=ssl.PROTOCOL_TLSv1_2, ciphers=args.mqtt_tls_ciphers)
-
-    # paho_mqtt_client.enable_logger()  # this is redundant with MqttApp._on_log()
-
-    # FIXME: make auth method modular ? (client certificate ?, tls pre-shared-key ?)
-    paho_mqtt_client.username_pw_set(username=get_env(ENV_MQTT_USER_NAME), password=get_env(ENV_MQTT_USER_PASSWORD))
-
-    # TODO: implement proxying ? https://eclipse.dev/paho/files/paho.mqtt.python/html/client.html#paho.mqtt.client.Client.proxy_set
-
-    mqtt_app = MqttApp(paho_mqtt_client, in_queue, mqtt_client_id=mqtt_client_id)
-    mqtt_app.start(args.mqtt_host, args.mqtt_port, args.mqtt_keep_alive)
-
-    while True:
+    def try_run(args_: argparse.Namespace) -> None:
         try:
-            time.sleep(0.1)
-        except KeyboardInterrupt:
-            break
+            run(args_)
+        except AppError as e:
+            logging.critical(f"Application error: {e}")
+            sys.exit(2)
 
-    mqtt_app.stop()
-
-    logging.info("Shutting down MQTT client.")
-
-
-def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(ARG_TRACE, action="store_true")
+    parser.add_argument("--trace", action="store_true")
     parser.add_argument("-l", "--log-level", choices=("debug", "info", "warning", "error", "critical"),
                         default=os.environ.get(ENV_MQTT_LOG_LEVEL, DEFAULT_MQTT_LOG_LEVEL), metavar="LVL")
     parser.add_argument("--mqtt-keep-alive", type=int, metavar="SEC",
@@ -85,22 +56,17 @@ def main():
                         metavar="MS")
 
     args = parser.parse_args()
-    logging.basicConfig(format="%(levelname)s %(message)s", level=getattr(logging, args.log_level.upper()))
+    log_level = getattr(logging, args.log_level.upper())
+    logging.basicConfig(format="%(levelname)s %(message)s", level=log_level)
+    logging.getLogger("asyncio").setLevel(log_level)
     logging.debug(f"Args: {args}")
-    run(args)
 
-
-def try_main():
-    try:
-        main()
-        logging.info("Application finished without error.")
-    except AppError as e:
-        logging.error(e)
-        sys.exit(2)
+    if args.trace:
+        run(args)
+    else:
+        try_run(args)
+    logging.info("Finished.")
 
 
 if __name__ == '__main__':
-    if ARG_TRACE in sys.argv[1:]:
-        main()
-    else:
-        try_main()
+    main()

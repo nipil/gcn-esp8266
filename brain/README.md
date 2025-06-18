@@ -2,11 +2,12 @@
 
 PAHO doc : https://eclipse.dev/paho/files/paho.mqtt.python/html/index.html
 
-TODO:
-- create management account in mosquitto
-- find mqtt client library in python
-- connect to mqtt server
-- subscribe to gcn/+/out/#
+
+# python asyncio debug
+
+    export PYTHONASYNCIODEBUG=1
+
+# TODO
 - check if devices are online/offline
 - test publish to gcn/#/in/reboot & co
 - read all gpio messages for gpio
@@ -33,6 +34,10 @@ TODO:
   - add tracing
   - add metrics
 
+- mqtt
+  - auth client cert (mtls)
+  - auth tls preshared key ?
+  - using proxy ?
 
 - callback URL
   - id : numéro d'identification du SMS
