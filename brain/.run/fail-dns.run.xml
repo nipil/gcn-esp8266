@@ -1,7 +1,7 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="package" type="PythonConfigurationType" factoryName="Python">
+  <configuration default="false" name="fail-dns" type="PythonConfigurationType" factoryName="Python">
     <module name="brain" />
-    <option name="ENV_FILES" value="$PROJECT_DIR$/.env" />
+    <option name="ENV_FILES" value="$PROJECT_DIR$/environments/fail-dns.env" />
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
     <envs>
@@ -16,7 +16,7 @@
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <option name="SCRIPT_NAME" value="gcn_manager" />
-    <option name="PARAMETERS" value="--trace --log-level info" />
+    <option name="PARAMETERS" value="--trace --log-level debug" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="true" />

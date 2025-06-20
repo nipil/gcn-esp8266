@@ -1,38 +1,62 @@
 #!/usr/bin/env python3
 
-import argparse
 import asyncio
 import logging
 import os
+import random
+import ssl
 import sys
+from argparse import ArgumentParser
 
 from gcn_manager import AppError, get_env
-from gcn_manager.app import App
+from gcn_manager.backoff import ExponentialFullRandomBackOff
+from gcn_manager.brain import BrainApp, run_app
 from gcn_manager.constants import *
+from gcn_manager.mqtt import MqttApp, run_mqtt_app
+
+# Source: https://github.com/aio-libs/aiopg/issues/678#issuecomment-667908402
+# because asyncio.loop.add/remove_reader/writer raise NotImplemented
+# when using the default of WindowsProactorEventLoopPolicy()
+if sys.version_info >= (3, 8) and os.name == "nt":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
-def main() -> None:
-    async def run_loop_forever(app: App) -> None:
-        while True:
-            await app.loop()
-            await asyncio.sleep(args.idle_loop_sleep)
+async def _run_async(args) -> None:
+    # initialize random number generator
+    random.seed()
+    # shared queue
+    received_messages = asyncio.Queue(args.mqtt_in_queue_max_size)
+    # get current running async loop
+    loop = asyncio.get_running_loop()
+    # setup MQTT task
+    mqtt_app = MqttApp(args, loop, received_messages)
+    mqtt_back_off = ExponentialFullRandomBackOff(3, 30)
+    mqtt_app_task = loop.create_task(run_mqtt_app(mqtt_app, mqtt_back_off))
+    # setup App task
+    # TODO: add notifier configuration injection
+    # TODO: add eventual notifier back off
+    brain_app = BrainApp(args, received_messages, mqtt_app)
+    brain_app_task = loop.create_task(run_app(brain_app))
+    # wait for tasks to complete
+    await asyncio.gather(mqtt_app_task, brain_app_task)
 
-    def run(args_: argparse.Namespace) -> None:
-        with App(args_) as app:  # automatic shutdown on clean exit
-            try:
-                asyncio.run(run_loop_forever(app))
-            except KeyboardInterrupt:
-                pass
 
-    def try_run(args_: argparse.Namespace) -> None:
-        try:
-            run(args_)
-        except AppError as e:
-            logging.critical(f"Application error: {e}")
-            sys.exit(2)
+def _tls_available_versions():
+    return (v for v in vars(ssl.TLSVersion) if not v.startswith('_'))
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--trace", action="store_true")
+
+def _tls_version(tls_version: str):
+    if tls_version is None:
+        return None
+    if not hasattr(ssl.TLSVersion, tls_version):
+        versions = " ".join(_tls_available_versions())
+        raise AppError(f"Unknown TLS version '{tls_version}', available versions: {versions}")
+    return getattr(ssl.TLSVersion, tls_version)
+
+
+def main_trace() -> None:
+    parser = ArgumentParser()
+    parser.add_argument(CLI_OPT_TRACE, action="store_true")
     parser.add_argument("-l", "--log-level", choices=("debug", "info", "warning", "error", "critical"),
                         default=os.environ.get(ENV_MQTT_LOG_LEVEL, DEFAULT_MQTT_LOG_LEVEL), metavar="LVL")
     parser.add_argument("--mqtt-keep-alive", type=int, metavar="SEC",
@@ -47,10 +71,17 @@ def main() -> None:
                         default=os.environ.get(ENV_MQTT_IN_QUEUE_MAX_SIZE, DEFAULT_MQTT_IN_QUEUE_MAX_SIZE))
     parser.add_argument("--mqtt-client-id-random-bytes", type=int, metavar="N",
                         default=os.environ.get(ENV_MQTT_CLIENT_ID_RANDOM_BYTES, DEFAULT_MQTT_CLIENT_ID_RANDOM_BYTES))
-    parser.add_argument("--mqtt-host", default=get_env(ENV_MQTT_SERVER_HOST), metavar="HOST")
-    parser.add_argument("--mqtt-port", type=int, default=get_env(ENV_MQTT_SERVER_PORT), metavar="PORT")
+    parser.add_argument("--mqtt-host", metavar="HOST")
+    parser.add_argument("--mqtt-port", type=int, metavar="PORT")
+    parser.add_argument("--mqtt-tls-min-version", metavar="VER", choices=_tls_available_versions(),
+                        default=_tls_version(os.environ.get(ENV_MQTT_TLS_MIN_VERSION, DEFAULT_MQTT_TLS_MIN_VERSION)))
+    parser.add_argument("--mqtt-tls-max-version", metavar="VER", choices=_tls_available_versions(),
+                        default=_tls_version(os.environ.get(ENV_MQTT_TLS_MAX_VERSION, DEFAULT_MQTT_TLS_MAX_VERSION)))
     parser.add_argument("--mqtt-tls-ciphers", default=os.environ.get(ENV_MQTT_TLS_CIPHERS, DEFAULT_MQTT_TLS_CIPHERS),
                         metavar="STR")
+    parser.add_argument("--mqtt-socket-send-buffer-size", type=int,
+                        default=os.environ.get(ENV_MQTT_SOCKET_SEND_BUFFER_SIZE, DEFAULT_MQTT_SOCKET_SEND_BUFFER_SIZE),
+                        metavar="N")
     parser.add_argument("--idle-loop-sleep",
                         default=os.environ.get(ENV_GCN_IDLE_LOOP_SLEEP_MS, DEFAULT_GCN_IDLE_LOOP_SLEEP_MS),
                         metavar="MS")
@@ -61,12 +92,30 @@ def main() -> None:
     logging.getLogger("asyncio").setLevel(log_level)
     logging.debug(f"Args: {args}")
 
-    if args.trace:
-        run(args)
-    else:
-        try_run(args)
-    logging.info("Finished.")
+    if args.mqtt_host is None:
+        args.mqtt_host = get_env(ENV_MQTT_SERVER_HOST)
+    if args.mqtt_port is None:
+        try:
+            args.mqtt_port = int(get_env(ENV_MQTT_SERVER_PORT))
+        except ValueError as e:
+            raise AppError(f"MQTT server port must be an integer: {e}")
+
+    try:
+        asyncio.run(_run_async(args))
+    except KeyboardInterrupt:
+        logging.info("Shutting down due to user interruption")
+
+
+def main() -> None:
+    try:
+        main_trace()
+    except AppError as e:
+        logging.critical(f"Application error: {e}")
+        sys.exit(2)
 
 
 if __name__ == '__main__':
-    main()
+    if CLI_OPT_TRACE in sys.argv[1:]:
+        main_trace()
+    else:
+        main()
