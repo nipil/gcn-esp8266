@@ -91,6 +91,178 @@ Technical
 
 - SMS API CookBook : https://help.ovhcloud.com/csm/fr-sms-api-cookbook?id=kb_article_view&sysparm_article=KB0039149
 - SMS API : https://eu.api.ovh.com/console/?section=%2Fsms&branch=v1
+  - get /v1/sms = list of services
+  - post /v1/sms/estimate =
+    - request 
+      - message : string
+      - noStopClause: boolean = no STOP clause in the message (requires this is not an advertising message)
+      - senderType: enum All existing types for a given sender = alpha|numeric|shortcode|virtual
+    - reponse
+      - characters: integer, number, including invisible escaped characters
+      - charactersClass: enum = 7bits|unicode
+      - maxCharactersPerPart: integer, number of char every SMS part can contain, dep on class and quantity of parts
+      - parts: integer = The quantity of SMS parts the message will be split in
+
+
+    {
+      "message": "Ici ç'est Päris !",
+      "noStopClause": false,
+      "senderType": "alpha"
+    }
+
+    {
+      "parts": 1,
+      "charactersClass": "unicode",
+      "maxCharactersPerPart": 70,
+      "characters": 28
+    }
+ 
+
+  - get  /v1/sms/ptts pour les codes de fonctionnement
+  - GET /sms/{serviceName}
+
+
+    {
+      "description": "",
+      "smsResponse": {
+        "text": "",
+        "cgiUrl": "",
+        "responseType": "none",
+        "trackingOptions": [
+          {
+            "target": "nicolas.pillot@gmail.com",
+            "media": "email",
+            "sender": "nicolas.pillot@gmail.com"
+          }
+        ],
+        "trackingDefaultSmsSender": ""
+      },
+      "name": "sms-pn33826-1",
+      "creditsHoldByQuota": 10,
+      "callBack": "",
+      "stopCallBack": "",
+      "templates": {
+        "customizedSmsMode": false,
+        "customizedEmailMode": false,
+        "time2chatAutomaticResponse": null,
+        "emailSubject": null,
+        "smsBody": null,
+        "emailFrom": null,
+        "emailBody": null
+      },
+      "smpp": false,
+      "userQuantityWithQuota": 1,
+      "channel": "both",
+      "status": "enable",
+      "creditThresholdForAutomaticRecredit": 0,
+      "creditsLeft": 10,
+      "automaticRecreditAmount": null,
+      "iam": {
+        "id": "dedf2701-0d80-4dcb-a16f-169335bb4cfb",
+        "urn": "urn:v1:eu:resource:sms:sms-pn33826-1"
+      }
+    }
+
+
+
+- GET /sms/{serviceName}/senders
+
+- GET /sms/{serviceName}/senders/{sender}
+
+{
+  "validationMedia": "moderation",
+  "sender": "NPILLOT",
+  "referer": "custom",
+  "type": "alpha",
+  "description": "",
+  "status": "waitingValidation",
+  "comment": ""
+}
+
+status enum Allowed: disable|enable|refused|waitingValidation
+type enum|null (requis) Allowed: alpha|numeric|shortcode|virtual --> TODO: reuse type for sms message
+
+- GET /sms/{serviceName}/sendersAvailableForValidation
+
+
+    [
+      {
+        "referer": "domain",
+        "sender": "NIPILORG"
+      },
+      {
+        "referer": "nichandle",
+        "sender": "PILLOT"
+      },
+      {
+        "sender": "NPILLOT",
+        "referer": "nichandle"
+      }
+    ]
+
+- GET /sms/{serviceName}/incoming
+  - GET /sms/{serviceName}/jobs/{id}
+- GET /sms/{serviceName}/jobs
+
+
+    {
+      "charset": "UTF-8",
+      "class": "flash",
+      "coding": "7bit",
+      "differedPeriod": 0,
+      "message": "string",
+      "noStopClause": false,
+      "priority": "high",
+      "receivers": [
+        "string"
+      ],
+      "receiversDocumentUrl": "string",
+      "receiversSlotId": "string",
+      "sender": "string",
+      "senderForResponse": false,
+      "tag": "string",
+      "validityPeriod": 0
+    }
+
+    {
+    "ids": [ 0 ],
+    "invalidReceivers": [ "string" ],
+    "tag": "string",
+    "totalCreditsRemoved": 0,
+    "validReceivers": [ "string" ]
+    }
+
+- GET /sms/{serviceName}/outgoing/{id}
+
+- GET /sms/{serviceName}/users/{login}
+
+    
+    {
+      "login": "gcn-MZLipxDq",
+      "callBack": "",
+      "alertThresholdInformations": {
+        "alertNumber": "0033676590679",
+        "alertEmail": "nicolas.pillot@gmail.com",
+        "alertThreshold": 5,
+        "support": "mail"
+      },
+      "stopCallBack": "",
+      "ipRestrictions": [
+        "62.35.25.75",
+        "82.66.250.158"
+      ],
+      "password": "xxx",
+      "quotaInformations": {
+        "quotaStatus": "active",
+        "quotaLeft": 10
+      }
+    }
+
+- POST /sms/{serviceName}/users/{login}/jobs
+- GET /sms/{serviceName}/users/{login}/jobs
+- 
+- GET /sms/{serviceName}/users/{login}/incoming
+
 
 Create an SMS account by using the trial offer or buying a message pack
 
@@ -115,5 +287,11 @@ Create a dedicated user for this application :
 6. notification
   - back in the account (not user) configure notifications upon message reception
   - TODO: check for gmail filtering as src could be a gmail account, and email is sent from ovh
+
+API calls:
+
+- envoi : POST /sms/{serviceName}/jobs
+- 
+
 
 Create an API token : https://www.ovh.com/auth/api/createToken

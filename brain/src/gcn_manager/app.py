@@ -20,13 +20,12 @@ class App:
         self.inbox_queue = queue.Queue(maxsize=args.mqtt_in_queue_max_size)
         # PAHO mqtt synchronous client
         mqtt_client_id = get_client_id(args.mqtt_client_id_random_bytes)
-        paho_mqtt_client = create_paho_client(mqtt_client_id, user_name=get_env(ENV_MQTT_USER_NAME),
+        paho_mqtt_client = create_paho_client(mqtt_client_id, connect_timeout=args.mqtt_connect_timeout,
+                                              reconnect_on_failure=args.mqtt_reconnect,
+                                              user_name=get_env(ENV_MQTT_USER_NAME),
                                               user_password=get_env(ENV_MQTT_USER_PASSWORD),
-                                              transport=args.mqtt_transport, reconnect_on_failure=args.mqtt_reconnect,
-                                              connect_timeout=args.mqtt_connect_timeout,
-                                              tls_ciphers=args.mqtt_tls_ciphers)
+                                              transport=args.mqtt_transport, tls_ciphers=args.mqtt_tls_ciphers)
         # thin wrapper around paho client (for logging, exceptions and life-cycle)
-        self.mqtt_app = MqttApp(paho_mqtt_client, self.inbox_queue, mqtt_client_id=mqtt_client_id)
         self.mqtt_app.start(args.mqtt_host, args.mqtt_port, args.mqtt_keep_alive)
 
     def __enter__(self):

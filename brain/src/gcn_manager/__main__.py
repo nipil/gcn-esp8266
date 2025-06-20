@@ -1,37 +1,71 @@
 #!/usr/bin/env python3
 
-import argparse
 import asyncio
 import logging
 import os
+import random
 import sys
+from argparse import ArgumentParser
+from queue import Queue
 
 from gcn_manager import AppError, get_env
-from gcn_manager.app import App
 from gcn_manager.constants import *
+from gcn_manager.mqtt import MqttClient
+
+# Source: https://github.com/aio-libs/aiopg/issues/678#issuecomment-667908402
+# because asyncio.loop.add/remove_reader/writer raise NotImplemented
+# when using the default of WindowsProactorEventLoopPolicy()
+if sys.version_info >= (3, 8) and os.name == "nt":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
+async def run_mqtt_client(args, loop, out_queue: Queue) -> None:
+    mqtt = MqttClient(args, loop, out_queue)
+    mqtt.connect()
+    await mqtt.finished
+    logging.info("Task MQTT client has finished")  # FIXME: should it really be allowed to finish ?!
+
+    # TODO: retry on recoverable errors
+
+
+async def run_brain(args, in_queue: Queue) -> None:
+    while True:
+        await asyncio.sleep(1)
+
+    # TODO: allow task to exit (currently, only KeyboardInterrupt is automatic), instead of canceling ?
+
+
+async def _run_async(args) -> None:
+    # initialize random number generator
+    random.seed()
+    # shared queue
+    received_messages = Queue()
+    # get current running async loop and create tasks
+    loop = asyncio.get_event_loop()
+    mqtt_client_task = loop.create_task(run_mqtt_client(args, loop, received_messages))
+    brain_task = loop.create_task(run_brain(args, received_messages))
+    # TODO: build list and wait on any, and loop gather list until list is empty
+    # run up to completion or interruption
+    await asyncio.gather(brain_task, mqtt_client_task)
+
+
+def _run(args) -> None:
+    try:
+        asyncio.run(_run_async(args))
+    except KeyboardInterrupt:
+        pass
+
+
+def _try_run(args) -> None:
+    try:
+        _run(args)
+    except AppError as e:
+        logging.critical(f"Application error: {e}")
+        sys.exit(2)
 
 
 def main() -> None:
-    async def run_loop_forever(app: App) -> None:
-        while True:
-            await app.loop()
-            await asyncio.sleep(args.idle_loop_sleep)
-
-    def run(args_: argparse.Namespace) -> None:
-        with App(args_) as app:  # automatic shutdown on clean exit
-            try:
-                asyncio.run(run_loop_forever(app))
-            except KeyboardInterrupt:
-                pass
-
-    def try_run(args_: argparse.Namespace) -> None:
-        try:
-            run(args_)
-        except AppError as e:
-            logging.critical(f"Application error: {e}")
-            sys.exit(2)
-
-    parser = argparse.ArgumentParser()
+    parser = ArgumentParser()
     parser.add_argument("--trace", action="store_true")
     parser.add_argument("-l", "--log-level", choices=("debug", "info", "warning", "error", "critical"),
                         default=os.environ.get(ENV_MQTT_LOG_LEVEL, DEFAULT_MQTT_LOG_LEVEL), metavar="LVL")
@@ -51,6 +85,9 @@ def main() -> None:
     parser.add_argument("--mqtt-port", type=int, default=get_env(ENV_MQTT_SERVER_PORT), metavar="PORT")
     parser.add_argument("--mqtt-tls-ciphers", default=os.environ.get(ENV_MQTT_TLS_CIPHERS, DEFAULT_MQTT_TLS_CIPHERS),
                         metavar="STR")
+    parser.add_argument("--mqtt-socket-send-buffer-size", type=int,
+                        default=os.environ.get(ENV_MQTT_SOCKET_SEND_BUFFER_SIZE, DEFAULT_MQTT_SOCKET_SEND_BUFFER_SIZE),
+                        metavar="BYTES")
     parser.add_argument("--idle-loop-sleep",
                         default=os.environ.get(ENV_GCN_IDLE_LOOP_SLEEP_MS, DEFAULT_GCN_IDLE_LOOP_SLEEP_MS),
                         metavar="MS")
@@ -62,9 +99,9 @@ def main() -> None:
     logging.debug(f"Args: {args}")
 
     if args.trace:
-        run(args)
+        _run(args)
     else:
-        try_run(args)
+        _try_run(args)
     logging.info("Finished.")
 
 
