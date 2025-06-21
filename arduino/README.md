@@ -1,8 +1,20 @@
 # GCN on NodeMCU 8266 using Arduino IDE
 
-Thanks to https://www.emqx.com/en/blog/esp8266-connects-to-the-public-mqtt-broker for the tutorial.
+Hardware (in a derivation box) :
+
+![hardware](hardware.jpg)
+
+Schematic (done in EasyEDA) :
+
+![schematic](schematic.png)
+
+Hardware and schematic on OpenSource Hardware Lab : https://oshwlab.com/nipil/gcn-esp8266
+
+EasyEDA editor : https://easyeda.com/editor#project_id=a4e3cc775c9943d58ffc321e2efb51e4
 
 # Arduino monitor
+
+Thanks to https://www.emqx.com/en/blog/esp8266-connects-to-the-public-mqtt-broker for the MQTT tutorial.
 
 Features :
 
