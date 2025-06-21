@@ -74,3 +74,70 @@ Features :
 - Tools / Manage libraries
   - `PubSubClient` by Nick O'Leary (version 2.8.0 as of this writing)
     - Documentation : http://pubsubclient.knolleary.net/
+
+## Resulting MQTT data
+
+Here is all the MQTT topics pushed  by the client (most are optional, and configured at compile time)
+
+    mosquitto_sub -h xxx.yyyyyyyyyyyyy.zzz -p 8883 -u username -P password -t 'gcn/#' -v
+
+    gcn/AA:BB:CC:DD:EE:11/out/status online
+    gcn/AA:BB:CC:DD:EE:11/out/hardware esp8266
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/reset_reason Software/System restart
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/chip_id 10000007
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/core_version 3.1.2
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/sdk_version 2.2.2-dev(38a443e)
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/cpu_freq_mhz 160
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/sketch_size 428896
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/free_sketch_size 1667072
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/sketch_md5 faedb1aaaaaaaaaaaaaaaaaaaaaaaaaa
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/flash_chip_id 1000002
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/flash_chip_size 4194304
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/flash_chip_real_size 4194304
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/flash_chip_speed_hz 40000000
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/check_flash_crc 1
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/free_heap 14104
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/heap_fragmentation_percent 4
+    gcn/AA:BB:CC:DD:EE:11/out/esp8266/max_free_block_size 13544
+    gcn/AA:BB:CC:DD:EE:11/out/uptime/system_ms 1208886
+    gcn/AA:BB:CC:DD:EE:11/out/uptime/wifi_ms 1208449
+    gcn/AA:BB:CC:DD:EE:11/out/uptime/sntp_ms 1204669
+    gcn/AA:BB:CC:DD:EE:11/out/uptime/mqtt_ms 1203653
+    gcn/AA:BB:CC:DD:EE:11/out/uptime/unix_timestamp 1750509320
+    gcn/AA:BB:CC:DD:EE:11/out/network/local_ip 192.168.x.y
+    gcn/AA:BB:CC:DD:EE:11/out/network/netmask 255.255.u.v
+    gcn/AA:BB:CC:DD:EE:11/out/network/gateway_ip 192.168.x.t
+    gcn/AA:BB:CC:DD:EE:11/out/network/dns/0 192.168.w.z
+    gcn/AA:BB:CC:DD:EE:11/out/network/ssid Bbox-1C92C458
+    gcn/AA:BB:CC:DD:EE:11/out/network/bssid 11:22:33:44:55:66
+    gcn/AA:BB:CC:DD:EE:11/out/network/rssi -74
+    gcn/AA:BB:CC:DD:EE:11/out/mqtt/sent_ok 115
+    gcn/AA:BB:CC:DD:EE:11/out/mqtt/sent_error 0
+    gcn/AA:BB:CC:DD:EE:11/out/mqtt/subscribe_ok 5
+    gcn/AA:BB:CC:DD:EE:11/out/mqtt/subscribe_error 0
+    gcn/AA:BB:CC:DD:EE:11/out/mqtt/connect_ok 1
+    gcn/AA:BB:CC:DD:EE:11/out/mqtt/connect_error 0
+    gcn/AA:BB:CC:DD:EE:11/out/mqtt/received 1
+    gcn/AA:BB:CC:DD:EE:11/out/buffer_total_dropped_item 0
+    gcn/AA:BB:CC:DD:EE:11/out/gpio/D1 1 1750508119
+    gcn/AA:BB:CC:DD:EE:11/out/monitored_gpio D1
+    gcn/AA:BB:CC:DD:EE:11/out/heartbeat 1750509320
+    gcn/AA:BB:CC:DD:EE:11/out/heartbeat 1750509350
+
+IMPORTANT : even if we export network information, no privacy data is collected (neither passwords nor public IPs)
+
+Within these values, some units need explaining :
+
+- all size values are in bytes
+- some values have unit in name's suffix
+- `gcn/+/out/uptime/#` : function uptime in raw arduino `millis()` (duration since boot)
+- `heartbeat`, `unix_timestamp`, GPIO change second value, are all `unix timestamp` (seconds since 1970-01-01 midnight UTC)
+
+Here is a log sample regarding inputs (here, only for the a single GPIO)
+
+    # at boot, publish current state
+    Jun 21 11:34:09 myserver mosquitto[565]: 1750498449: Received PUBLISH from gcn-AA_BB_CC_DD_EE_11 (d0, q0, r1, m0, 'gcn/AA:BB:CC:DD:EE:11/out/gpio/D1', ... (12 bytes))
+    # on change, publish new value
+    Jun 21 11:34:21 myserver mosquitto[565]: 1750498461: Received PUBLISH from gcn-AA_BB_CC_DD_EE_11 (d0, q0, r1, m0, 'gcn/AA:BB:CC:DD:EE:11/out/gpio/D1', ... (12 bytes))
+    # on change, publish new value
+    Jun 21 11:34:35 myserver mosquitto[565]: 1750498475: Received PUBLISH from gcn-AA_BB_CC_DD_EE_11 (d0, q0, r1, m0, 'gcn/AA:BB:CC:DD:EE:11/out/gpio/D1', ... (12 bytes))

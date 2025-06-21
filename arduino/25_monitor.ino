@@ -47,7 +47,8 @@ void SinglePinTimeDebouncer::setup(InterruptServiceRoutine callback) {
   Serial.print(gpio_name);
   Serial.print(" number=");
   Serial.println(gpio_number);
-  pinMode(gpio_number, INPUT);
+  // TODO: make pullup configurable ?
+  pinMode(gpio_number, INPUT_PULLUP);
   last_stable_value = digitalRead(gpio_number);
   last_change_ms = millis();
   attachInterrupt(digitalPinToInterrupt(gpio_number), callback, CHANGE);
@@ -101,8 +102,9 @@ void DualPinComplementDebouncer::setup(InterruptServiceRoutine callback) {
   Serial.print(gpio_name_inverted);
   Serial.print(" number=");
   Serial.println(gpio_number_inverted);
-  pinMode(gpio_number, INPUT);
-  pinMode(gpio_number_inverted, INPUT);
+  // TODO: make pullup configurable ?
+  pinMode(gpio_number, INPUT_PULLUP);
+  pinMode(gpio_number_inverted, INPUT_PULLUP);
   last_stable_value = digitalRead(gpio_number);
   attachInterrupt(digitalPinToInterrupt(gpio_number), callback, CHANGE);
   attachInterrupt(digitalPinToInterrupt(gpio_number_inverted), callback, CHANGE);
