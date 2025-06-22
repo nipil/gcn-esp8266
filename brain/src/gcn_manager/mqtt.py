@@ -27,8 +27,8 @@ class MqttApp:
 
     def __init__(self, args, loop, receive_queue: asyncio.Queue) -> None:
         self._receive_queue = receive_queue
+        self._dropped_messages_because_receive_queue_was_full = 0
         self._loop = loop
-        self._enqueue_tasks = []
         self._idle_loop_sleep = args.idle_loop_sleep
         self._misc_loop_task: asyncio.Task | None = None
         self._finished: asyncio.Future | None = None  # to provide wait and status at the end
@@ -119,6 +119,10 @@ class MqttApp:
         logging.debug("Disconnecting cleanly from broker.")
         self._paho_mqtt_client.disconnect()
 
+    @property
+    def dropped_messages_because_receive_queue_was_full(self):
+        return self._dropped_messages_because_receive_queue_was_full
+
     def _set_status(self, *, online: bool) -> MQTTMessageInfo:
         topic = f"{MQTT_APP_MANAGER_STATUS}/{self._mqtt_client_id}"
         message = MQTT_APP_MANAGER_STATUS_ONLINE if online else MQTT_APP_MANAGER_STATUS_OFFLINE
@@ -193,9 +197,11 @@ class MqttApp:
                       f"payload {msg.payload}")
         # noinspection PyUnresolvedReferences
         message = AppMqttMessage(msg.topic, msg.payload.decode())
-        # schedule a free-flying task to put message in the reception queue, and track it to prevent garbage collection
-        task = self._loop.create_task(self._receive_queue.put(message))
-        self._enqueue_tasks.append(task)
+        try:
+            self._receive_queue.put_nowait(message)
+        except asyncio.QueueFull:
+            logging.warning(f"Receive message queue is full, dropping message {message}")
+            self._dropped_messages_because_receive_queue_was_full += 1
 
     @staticmethod
     def _on_pre_connect(_client: Client, _user_data: Any) -> None:
@@ -259,8 +265,6 @@ class MqttApp:
         while self._paho_mqtt_client.loop_misc() == MQTT_ERR_SUCCESS:
             try:
                 await asyncio.sleep(self._idle_loop_sleep)
-                # cleanup tracked freewheeling tasks upon completion
-                self._enqueue_tasks = [t for t in self._enqueue_tasks if not t.done()]
             except asyncio.CancelledError:
                 logging.debug("misc_loop cancelled")
                 break
@@ -270,7 +274,9 @@ class MqttApp:
 async def run_mqtt_app(mqtt: MqttApp, back_off: BackOff) -> None:
     while True:
         try:
-            # blocking call (see CLI timeout option)
+            # FIXME: blocking operation (see CLI timeout option)
+            # info : running connect in a ThreadPoolExecutor triggers a RuntimeError:
+            #        Non-thread-safe operation invoked on an event loop other than the current one
             mqtt.connect()
             # waits for disconnection or error
             reason_code = await mqtt.finished

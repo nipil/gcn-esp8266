@@ -1,6 +1,6 @@
 import asyncio
 import logging
-import pathlib
+from pathlib import PurePath
 
 from gcn_manager import AppMqttMessage
 from gcn_manager.constants import *
@@ -13,7 +13,7 @@ class BrainApp:
         self._mqtt_app = mqtt_app
 
     async def handle_manager_status(self, message: AppMqttMessage) -> None:
-        manager = pathlib.PurePath(message.topic).name
+        manager = PurePath(message.topic).name
         if len(message.payload) > 0 and message.payload != MQTT_APP_MANAGER_STATUS_ONLINE.encode():
             logging.info(f"Clearing status for manager {manager} : not {MQTT_APP_MANAGER_STATUS_ONLINE}.")
             self._mqtt_app.clear_topic(message.topic, qos=1)
@@ -30,7 +30,6 @@ class BrainApp:
             await self.handle_client_message(message)
 
 
-async def run_app(app: BrainApp) -> None:
-    await asyncio.sleep(5)
+async def run_brain_app(app: BrainApp) -> None:
     while True:
         await app.loop()

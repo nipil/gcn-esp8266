@@ -10,7 +10,7 @@ from argparse import ArgumentParser
 
 from gcn_manager import AppError, get_env
 from gcn_manager.backoff import ExponentialFullRandomBackOff
-from gcn_manager.brain import BrainApp, run_app
+from gcn_manager.brain import BrainApp, run_brain_app
 from gcn_manager.constants import *
 from gcn_manager.mqtt import MqttApp, run_mqtt_app
 
@@ -24,20 +24,14 @@ if sys.version_info >= (3, 8) and os.name == "nt":
 async def _run_async(args) -> None:
     # initialize random number generator
     random.seed()
-    # shared queue
-    received_messages = asyncio.Queue(args.mqtt_in_queue_max_size)
-    # get current running async loop
+    # dependencies
     loop = asyncio.get_running_loop()
-    # setup MQTT task
-    mqtt_app = MqttApp(args, loop, received_messages)
+    received_messages = asyncio.Queue(args.mqtt_in_queue_max_size)
     mqtt_back_off = ExponentialFullRandomBackOff(3, 30)
-    mqtt_app_task = loop.create_task(run_mqtt_app(mqtt_app, mqtt_back_off))
-    # setup App task
-    # TODO: add notifier configuration injection
-    # TODO: add eventual notifier back off
+    mqtt_app = MqttApp(args, loop, received_messages)
     brain_app = BrainApp(args, received_messages, mqtt_app)
-    brain_app_task = loop.create_task(run_app(brain_app))
-    # wait for tasks to complete
+    mqtt_app_task = loop.create_task(run_mqtt_app(mqtt_app, mqtt_back_off))
+    brain_app_task = loop.create_task(run_brain_app(brain_app))
     await asyncio.gather(mqtt_app_task, brain_app_task)
 
 
