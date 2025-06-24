@@ -17,8 +17,8 @@ class BrainApp:
 
     async def handle_manager_status(self, message: AppMqttMessage) -> None:
         manager = PurePath(message.topic).name
-        if message.payload == 0:
-            logging.warning(f"Empty status message for topic {message.topic}")
+        if len(message.payload) == 0:
+            logging.debug(f"Empty status message for topic {message.topic}")
             return
         status = message.payload.decode("utf-8")
         if status == MQTT_APP_MANAGER_STATUS_ONLINE:
@@ -95,17 +95,22 @@ class BrainApp:
         elif category == MQTT_APP_CLIENT_MONITORED_GPIO:
             pass
 
-    async def loop(self) -> None:
-        message = await self._receive_queue.get()
+    async def _loop(self) -> bool:
+        try:
+            message = await self._receive_queue.get()
+        except asyncio.CancelledError as e:
+            logging.debug("Brain app task is cancelled")
+            return False
         if self._mqtt_app.topic_matches_subscription(message.topic, MQTT_APP_MANAGER_STATUS_SUBSCRIPTION):
             await self.handle_manager_status(message)
         elif self._mqtt_app.topic_matches_subscription(message.topic, MQTT_APP_CLIENT_SUBSCRIPTION):
             await self.handle_client_message(message)
         else:
             logging.warning(f"Received message topic is not MQTT app: {message.topic}")
-            return
+        return True
 
-
-async def run_brain_app(app: BrainApp) -> None:
-    while True:
-        await app.loop()
+    async def run(self) -> None:
+        while True:
+            if not await self._loop():
+                break
+        logging.debug("Brain app task finished")

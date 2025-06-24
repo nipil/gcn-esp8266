@@ -6,37 +6,55 @@ import os
 import random
 import ssl
 import sys
+import signal
 from argparse import ArgumentParser
 
 from gcn_manager import AppError, get_env
 from gcn_manager.backoff import ExponentialFullRandomBackOff
-from gcn_manager.brain import BrainApp, run_brain_app
+from gcn_manager.brain import BrainApp
 from gcn_manager.constants import *
-from gcn_manager.mqtt import MqttApp, run_mqtt_app
-from gcn_manager.notifier import NotifyApp, run_notify_app
+from gcn_manager.mqtt import MqttApp
+from gcn_manager.notifier import NotifyApp
 
-# Source: https://github.com/aio-libs/aiopg/issues/678#issuecomment-667908402
-# because asyncio.loop.add/remove_reader/writer raise NotImplemented
-# when using the default of WindowsProactorEventLoopPolicy()
-if sys.version_info >= (3, 8) and os.name == "nt":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+def graceful_shutdown(sig: signal.Signals, mqtt_app, mqtt_app_task):
+    if sig == signal.SIGINT:
+        sig = "SIGINT"
+    elif sig == signal.SIGTERM:
+        sig = "SIGTERM"
+    logging.info(f"Received signal {sig}, shutting down gracefully")
+    for task in asyncio.all_tasks():
+        if task is mqtt_app_task:
+            # request that the task terminate gracefully instead of being cancelled
+            mqtt_app.disconnect()
+            continue
+        task.cancel()
 
 
 async def _run_async(args) -> None:
-    # initialize random number generator
+    # initialize
     random.seed()
+
     # dependencies
-    loop = asyncio.get_running_loop()
+    event_loop = asyncio.get_running_loop()
     received_messages = asyncio.Queue(args.mqtt_in_queue_max_size)
     notify_queue = asyncio.Queue(args.notification_out_queue_max_size)
-    mqtt_back_off = ExponentialFullRandomBackOff(3, 30)
-    mqtt_app = MqttApp(args, loop, received_messages)
+    mqtt_connect_back_off = ExponentialFullRandomBackOff(3, 30)
+    mqtt_app = MqttApp(args, event_loop, received_messages, mqtt_connect_back_off)
     brain_app = BrainApp(args, received_messages, mqtt_app, notify_queue)
-    mqtt_app_task = loop.create_task(run_mqtt_app(mqtt_app, mqtt_back_off))
-    brain_app_task = loop.create_task(run_brain_app(brain_app))
-    notification_app = NotifyApp(args, notify_queue)
-    notification_task = loop.create_task(run_notify_app(notification_app))
-    await asyncio.gather(mqtt_app_task, brain_app_task, notification_task)
+    notify_app = NotifyApp(args, notify_queue)
+    mqtt_task = event_loop.create_task(mqtt_app.run())
+    brain_task = event_loop.create_task(brain_app.run())
+    notify_task = event_loop.create_task(notify_app.run())
+
+    # shutdown
+    for sig in (signal.SIGINT, signal.SIGTERM):  # signal.SIGHUP ?
+        event_loop.add_signal_handler(sig, graceful_shutdown, sig, mqtt_app, mqtt_task)
+
+    try:
+        await asyncio.gather(mqtt_task, brain_task, notify_task)
+    except asyncio.CancelledError:
+        logging.info("Application tasks have been cancelled")
 
     # TODO: handle clean disconnect
 
