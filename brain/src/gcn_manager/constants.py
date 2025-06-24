@@ -70,9 +70,9 @@ ENV_OVH_API_CONSUMER_KEY = "OVH_CONSUMER_KEY"
 MQTT_APP = "gcn"
 MQTT_APP_CLIENT_OUT = "out"
 MQTT_APP_CLIENT_STATUS = "status"
-MQTT_APP_CLIENT_MONITORED_GPIO= "monitored_gpio"
-MQTT_APP_CLIENT_HEARTBEAT= "heartbeat_timestamp"
-MQTT_APP_CLIENT_BUFFER_TOTAL_DROPPED_ITEM= "buffer_total_dropped_item"
+MQTT_APP_CLIENT_MONITORED_GPIO = "monitored_gpio"
+MQTT_APP_CLIENT_HEARTBEAT = "heartbeat_timestamp"
+MQTT_APP_CLIENT_BUFFER_TOTAL_DROPPED_ITEM = "buffer_total_dropped_item"
 MQTT_APP_CLIENT_SUBSCRIPTION = f"{MQTT_APP}/+/{MQTT_APP_CLIENT_OUT}/+"  # first level is where the good stuff is !
 
 # hardcoded values from Brain program

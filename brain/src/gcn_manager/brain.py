@@ -2,18 +2,14 @@ import asyncio
 import logging
 from pathlib import PurePath
 
-from gcn_manager import AppMqttMessage, ClientInfo, ClientStatus
+from gcn_manager import AppMqttMessage, ClientInfo, ClientStatus, MessageProcessor, MqttPublisher
 from gcn_manager.constants import *
-from gcn_manager.mqtt import MqttApp
 from gcn_manager.notifier import BufferTotalDroppedItem
 
 
-class BrainApp:
-    def __init__(self, _args, receive_queue: asyncio.Queue, mqtt_app: MqttApp, notify_queue: asyncio.Queue):
+class Brain(MessageProcessor):
+    def __init__(self, _args, ):
         self._clients = dict()
-        self._receive_queue = receive_queue
-        self._mqtt_app = mqtt_app
-        self._notify_queue = notify_queue
 
     async def handle_manager_status(self, message: AppMqttMessage) -> None:
         manager = PurePath(message.topic).name
@@ -101,6 +97,7 @@ class BrainApp:
         except asyncio.CancelledError as e:
             logging.debug("Brain app task is cancelled")
             return False
+        # TODO: do not parse topics multiple times
         if self._mqtt_app.topic_matches_subscription(message.topic, MQTT_APP_MANAGER_STATUS_SUBSCRIPTION):
             await self.handle_manager_status(message)
         elif self._mqtt_app.topic_matches_subscription(message.topic, MQTT_APP_CLIENT_SUBSCRIPTION):
@@ -114,3 +111,7 @@ class BrainApp:
             if not await self._loop():
                 break
         logging.debug("Brain app task finished")
+
+    async def process(self, topic: str, payload: bytes | bytearray, *, publisher: MqttPublisher) -> None:
+        logging.critical(f"Processing {topic} with {payload}")
+        await asyncio.sleep(1)

@@ -1,19 +1,17 @@
 import asyncio
-from functools import partial
-
-import backoff
 import logging
-import random
 import socket
 import ssl
+from functools import partial
 from typing import Any
 
+import backoff
 import paho
 from paho.mqtt.client import Client, ConnectFlags, DisconnectFlags, ReasonCodes, Properties, MQTTMessage, \
     MQTTMessageInfo, MQTT_LOG_INFO, MQTT_LOG_NOTICE, MQTT_LOG_WARNING, MQTT_LOG_ERR, MQTT_LOG_DEBUG, MQTT_ERR_NO_CONN, \
     MQTT_ERR_SUCCESS, PayloadType, topic_matches_sub
 
-from gcn_manager import AppError, AppMqttMessage, get_env
+from gcn_manager import AppError, get_env, MqttPublisher, MessageProcessor
 from gcn_manager.constants import *
 
 
@@ -24,30 +22,26 @@ from gcn_manager.constants import *
 # async code from example
 #   https://github.com/eclipse-paho/paho.mqtt.python/blob/master/examples/loop_asyncio.py
 
+class MqttAgent(MqttPublisher):
 
-async def processing(msg: MQTTMessage):
-    logging.debug(f"task started for {msg}")
-    await asyncio.sleep(0.1)
-    logging.debug(f"task finished for {msg}")
-
-
-class MqttApp:
-
-    def __init__(self, args, receive_queue: asyncio.Queue) -> None:
+    def __init__(self, args, client_id: str, *, processor: MessageProcessor) -> None:
+        # message processing
+        self._processor = processor
         self._handling_tasks = set()
-        self._receive_queue = receive_queue
-        self._dropped_messages_because_receive_queue_was_full = 0
-        # self._event_loop = loop
+
         self._idle_loop_sleep = args.idle_loop_sleep
         self._misc_loop_task: asyncio.Task | None = None
+
         self._finished: asyncio.Future | None = None  # to provide wait and status at the end
+
+        # PAHO client configuration
+        self._client_id = client_id
         self._mqtt_socket_send_buffer_size = args.mqtt_socket_send_buffer_size
-        self._mqtt_client_id = f"{MQTT_APP}_manager_{random.randbytes(args.mqtt_client_id_random_bytes).hex().lower()}"
         self._mqtt_host = args.mqtt_host
         self._mqtt_port = args.mqtt_port
         self._mqtt_keep_alive = args.mqtt_keep_alive
         self._paho_mqtt_client = Client(callback_api_version=paho.mqtt.client.CallbackAPIVersion.VERSION2,
-                                        clean_session=True, client_id=self._mqtt_client_id,
+                                        clean_session=True, client_id=self._client_id,
                                         protocol=paho.mqtt.client.MQTTv311, transport=args.mqtt_transport,
                                         reconnect_on_failure=args.mqtt_reconnect)
         context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
@@ -77,9 +71,11 @@ class MqttApp:
         self._paho_mqtt_client.on_socket_unregister_write = self._on_socket_unregister_write
         self._paho_mqtt_client.on_subscribe = self._on_subscribe
         self._paho_mqtt_client.on_unsubscribe = self._on_unsubscribe
-        self._paho_mqtt_client.will_set(topic=MQTT_APP_MANAGER_STATUS_TOPIC, payload=MQTT_APP_MANAGER_STATUS_OFFLINE,
-                                        qos=1,
-                                        retain=True)
+        self._paho_mqtt_client.will_set(topic=self.get_manager_status_topic(), payload=MQTT_APP_MANAGER_STATUS_OFFLINE,
+                                        qos=1, retain=True)
+
+    def get_manager_status_topic(self):
+        return f"{MQTT_APP_MANAGER_STATUS_TOPIC}/{self._client_id}"
 
     @backoff.on_exception(partial(backoff.expo, base=3, max_value=10),
                           (socket.gaierror, TimeoutError, ConnectionRefusedError))
@@ -93,20 +89,21 @@ class MqttApp:
 
         self._finished = asyncio.get_running_loop().create_future()
 
-    @property
-    def finished(self):
-        return self._finished
+    def publish(self, topic: str, payload: bytes | bytearray = None, qos: int = 0, retain: bool = False) -> None:
+        self._publish(topic, payload, qos, retain)
 
-    def publish(self, topic: str, payload: PayloadType = None, qos: int = 0, retain: bool = False,
-                properties: Properties | None = None) -> MQTTMessageInfo:
+    def _publish(self, topic: str, payload: PayloadType = None, qos: int = 0, retain: bool = False,
+                 properties: Properties | None = None) -> MQTTMessageInfo:
         return self._paho_mqtt_client.publish(topic, payload, qos, retain, properties)
 
     def clear_topic(self, topic: str, qos: int = 0) -> None:
         # to remove a retained message, the retained flag must be present
-        self.publish(topic, b'', qos=qos, retain=True)
+        self._publish(topic, b'', qos=qos, retain=True)
 
     @staticmethod
     def topic_matches_subscription(topic: str, subscription: str) -> bool:
+        # TODO: remove so we have no functional adherence to this mqtt client
+        # and we do not actually parse topics multiple times
         """Wrapper so that we do not have to change API if we need to reimplement when changing low-level MQTT client"""
         return topic_matches_sub(subscription, topic)
 
@@ -130,14 +127,14 @@ class MqttApp:
         logging.debug("Disconnecting cleanly from broker.")
         self._paho_mqtt_client.disconnect()
 
-    @property
-    def dropped_messages_because_receive_queue_was_full(self):
-        return self._dropped_messages_because_receive_queue_was_full
+    # @property
+    # def dropped_messages_because_receive_queue_was_full(self):
+    #     return self._dropped_messages_because_receive_queue_was_full
 
     def _set_status(self, *, online: bool) -> MQTTMessageInfo:
-        topic = f"{MQTT_APP_MANAGER_STATUS_TOPIC}/{self._mqtt_client_id}"
+        topic = self.get_manager_status_topic()
         message = MQTT_APP_MANAGER_STATUS_ONLINE if online else MQTT_APP_MANAGER_STATUS_OFFLINE
-        return self.publish(topic=topic, payload=message, qos=1, retain=True)
+        return self._publish(topic=topic, payload=message, qos=1, retain=True)
 
     def _on_connect(self, _client: Client, _user_data: Any, connect_flags: ConnectFlags, reason_code: ReasonCodes,
                     properties: Properties) -> None:
@@ -207,17 +204,12 @@ class MqttApp:
                       f"topic {msg.topic}, "
                       f"payload {msg.payload}")
 
-        # store a strong reference to the created task to prevent garbage collection in asyncio
-        processing_task = asyncio.get_running_loop().create_task(processing(msg))
-        self._handling_tasks.add(processing_task)
-
         # noinspection PyTypeChecker
-        message = AppMqttMessage(msg.topic, msg.payload)
-        try:
-            self._receive_queue.put_nowait(message)
-        except asyncio.QueueFull:
-            logging.warning(f"Receive message queue is full, dropping message {message}")
-            self._dropped_messages_because_receive_queue_was_full += 1
+        future = self._processor.process(msg.topic, msg.payload, publisher=self)
+        # create a task per message
+        task = asyncio.get_running_loop().create_task(future)
+        # store a strong reference to the created task to prevent garbage collection in asyncio
+        self._handling_tasks.add(task)
 
     @staticmethod
     def _on_pre_connect(_client: Client, _user_data: Any) -> None:

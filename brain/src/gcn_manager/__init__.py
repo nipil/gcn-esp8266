@@ -39,3 +39,15 @@ def get_env(key: str) -> str:
         return os.environ[key]
     except KeyError:
         raise AppError(f'Environment variable {key} not set')
+
+
+class MqttPublisher:
+
+    def publish(self, topic: str, payload: bytes | bytearray = None, qos: int = 0, retain: bool = False) -> None:
+        raise NotImplementedError()
+
+
+class MessageProcessor:
+
+    async def process(self, topic: str, payload: bytes | bytearray, *, publisher: MqttPublisher) -> None:
+        raise NotImplementedError()
