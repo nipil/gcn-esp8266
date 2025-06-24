@@ -1,4 +1,7 @@
 import asyncio
+from functools import partial
+
+import backoff
 import logging
 import random
 import socket
@@ -10,8 +13,7 @@ from paho.mqtt.client import Client, ConnectFlags, DisconnectFlags, ReasonCodes,
     MQTTMessageInfo, MQTT_LOG_INFO, MQTT_LOG_NOTICE, MQTT_LOG_WARNING, MQTT_LOG_ERR, MQTT_LOG_DEBUG, MQTT_ERR_NO_CONN, \
     MQTT_ERR_SUCCESS, PayloadType, topic_matches_sub
 
-from gcn_manager import AppError, AppErrorCanRetry, AppMqttMessage, get_env
-from gcn_manager.backoff import BackOff
+from gcn_manager import AppError, AppMqttMessage, get_env
 from gcn_manager.constants import *
 
 
@@ -23,12 +25,18 @@ from gcn_manager.constants import *
 #   https://github.com/eclipse-paho/paho.mqtt.python/blob/master/examples/loop_asyncio.py
 
 
+async def processing(msg: MQTTMessage):
+    logging.debug(f"task started for {msg}")
+    await asyncio.sleep(0.1)
+    logging.debug(f"task finished for {msg}")
+
+
 class MqttApp:
 
-    def __init__(self, args, loop: asyncio.AbstractEventLoop, receive_queue: asyncio.Queue, back_off: BackOff) -> None:
+    def __init__(self, args, loop: asyncio.AbstractEventLoop, receive_queue: asyncio.Queue) -> None:
+        self._handling_tasks = set()
         self._receive_queue = receive_queue
         self._dropped_messages_because_receive_queue_was_full = 0
-        self._back_off = back_off
         self._event_loop = loop
         self._idle_loop_sleep = args.idle_loop_sleep
         self._misc_loop_task: asyncio.Task | None = None
@@ -69,22 +77,20 @@ class MqttApp:
         self._paho_mqtt_client.on_socket_unregister_write = self._on_socket_unregister_write
         self._paho_mqtt_client.on_subscribe = self._on_subscribe
         self._paho_mqtt_client.on_unsubscribe = self._on_unsubscribe
-        self._paho_mqtt_client.will_set(topic=MQTT_APP_MANAGER_STATUS, payload=MQTT_APP_MANAGER_STATUS_OFFLINE, qos=1,
+        self._paho_mqtt_client.will_set(topic=MQTT_APP_MANAGER_STATUS_TOPIC, payload=MQTT_APP_MANAGER_STATUS_OFFLINE,
+                                        qos=1,
                                         retain=True)
 
-    def connect(self) -> None:
+    @backoff.on_exception(partial(backoff.expo, base=3, max_value=10),
+                          (socket.gaierror, TimeoutError, ConnectionRefusedError))
+    async def connect(self) -> None:
         logging.info(f"Connecting to MQTT broker '{self._mqtt_host}:{self._mqtt_port}'...")
         try:
             self._paho_mqtt_client.connect(self._mqtt_host, self._mqtt_port, self._mqtt_keep_alive)
-        except socket.gaierror as e:
-            raise AppErrorCanRetry(f"Could not resolve MQTT broker address '{self._mqtt_host}' : {e}")
-        except TimeoutError as e:
-            raise AppErrorCanRetry(f"Timed out while connecting to '{self._mqtt_host}' : {e}")
-        except ConnectionRefusedError as e:
-            raise AppErrorCanRetry(f"Impossible to connect to port {self._mqtt_port} on '{self._mqtt_host}' : {e}")
         except ssl.SSLError as e:
             # TLS errors are red flag for bad configuration or misbehaving actors : do not retry
             raise AppError(f"TLS error while communicating with {self._mqtt_port} of '{self._mqtt_host}' : {e}")
+
         self._finished = self._event_loop.create_future()
 
     @property
@@ -201,6 +207,10 @@ class MqttApp:
                       f"topic {msg.topic}, "
                       f"payload {msg.payload}")
 
+        # store a strong reference to the created task to prevent garbage collection in asyncio
+        processing_task = self._event_loop.create_task(processing(msg))
+        self._handling_tasks.add(processing_task)
+
         # noinspection PyTypeChecker
         message = AppMqttMessage(msg.topic, msg.payload)
         try:
@@ -274,25 +284,16 @@ class MqttApp:
             except asyncio.CancelledError:
                 logging.debug("MQTT misc_loop cancelled")
                 break
+            # purge finished processing tasks
+            self._handling_tasks = set(task for task in self._handling_tasks if not task.is_done())
         logging.debug("MQTT misc_loop finished")
 
     async def _loop(self):
         # attempt to connect
-        try:
-            # FIXME: blocking operation (see CLI timeout option)
-            # info : running connect in a ThreadPoolExecutor triggers a RuntimeError:
-            #        Non-thread-safe operation invoked on an event loop other than the current one
-            self.connect()
-        except AppErrorCanRetry as e:
-            duration = self._back_off.next()
-            logging.warning(f"Possible transient error encountered, will retry in {duration} seconds : {e}")
-            try:
-                await asyncio.sleep(duration)
-            except asyncio.CancelledError:
-                logging.info("MQTT app task is cancelled while waiting retrying connection")
-                return False
-        # connection succeeded, reinitialize back off
-        self._back_off.reset()
+        # FIXME: blocking operation (see CLI timeout option)
+        # info : running connect in a ThreadPoolExecutor triggers a RuntimeError:
+        #        Non-thread-safe operation invoked on an event loop other than the current one
+        await self.connect()
         # wait for termination or error
         try:
             reason_code = await self._finished

@@ -10,7 +10,6 @@ import signal
 from argparse import ArgumentParser
 
 from gcn_manager import AppError, get_env
-from gcn_manager.backoff import ExponentialFullRandomBackOff
 from gcn_manager.brain import BrainApp
 from gcn_manager.constants import *
 from gcn_manager.mqtt import MqttApp
@@ -39,8 +38,7 @@ async def _run_async(args) -> None:
     event_loop = asyncio.get_running_loop()
     received_messages = asyncio.Queue(args.mqtt_in_queue_max_size)
     notify_queue = asyncio.Queue(args.notification_out_queue_max_size)
-    mqtt_connect_back_off = ExponentialFullRandomBackOff(3, 30)
-    mqtt_app = MqttApp(args, event_loop, received_messages, mqtt_connect_back_off)
+    mqtt_app = MqttApp(args, event_loop, received_messages)
     brain_app = BrainApp(args, received_messages, mqtt_app, notify_queue)
     notify_app = NotifyApp(args, notify_queue)
     mqtt_task = event_loop.create_task(mqtt_app.run())
