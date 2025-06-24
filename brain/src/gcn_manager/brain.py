@@ -114,4 +114,5 @@ class Brain(MessageProcessor):
 
     async def process(self, topic: str, payload: bytes | bytearray, *, publisher: MqttPublisher) -> None:
         logging.critical(f"Processing {topic} with {payload}")
+        # TODO: actually plug the processing back
         await asyncio.sleep(1)
