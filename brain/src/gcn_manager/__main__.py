@@ -13,6 +13,7 @@ from gcn_manager.backoff import ExponentialFullRandomBackOff
 from gcn_manager.brain import BrainApp, run_brain_app
 from gcn_manager.constants import *
 from gcn_manager.mqtt import MqttApp, run_mqtt_app
+from gcn_manager.notifier import NotifyApp, run_notify_app
 
 # Source: https://github.com/aio-libs/aiopg/issues/678#issuecomment-667908402
 # because asyncio.loop.add/remove_reader/writer raise NotImplemented
@@ -27,12 +28,17 @@ async def _run_async(args) -> None:
     # dependencies
     loop = asyncio.get_running_loop()
     received_messages = asyncio.Queue(args.mqtt_in_queue_max_size)
+    notify_queue = asyncio.Queue(args.notification_out_queue_max_size)
     mqtt_back_off = ExponentialFullRandomBackOff(3, 30)
     mqtt_app = MqttApp(args, loop, received_messages)
-    brain_app = BrainApp(args, received_messages, mqtt_app)
+    brain_app = BrainApp(args, received_messages, mqtt_app, notify_queue)
     mqtt_app_task = loop.create_task(run_mqtt_app(mqtt_app, mqtt_back_off))
     brain_app_task = loop.create_task(run_brain_app(brain_app))
-    await asyncio.gather(mqtt_app_task, brain_app_task)
+    notification_app = NotifyApp(args, notify_queue)
+    notification_task = loop.create_task(run_notify_app(notification_app))
+    await asyncio.gather(mqtt_app_task, brain_app_task, notification_task)
+
+    # TODO: handle clean disconnect
 
 
 def _tls_available_versions():
@@ -79,6 +85,9 @@ def main_trace() -> None:
     parser.add_argument("--idle-loop-sleep",
                         default=os.environ.get(ENV_GCN_IDLE_LOOP_SLEEP_MS, DEFAULT_GCN_IDLE_LOOP_SLEEP_MS),
                         metavar="MS")
+    parser.add_argument("--notification-out-queue-max-size", type=int, metavar="N",
+                        default=os.environ.get(ENV_GCN_NOTIFICATION_OUT_QUEUE_MAX_SIZE,
+                                               DEFAULT_GCN_NOTIFICATION_OUT_QUEUE_MAX_SIZE))
 
     args = parser.parse_args()
     log_level = getattr(logging, args.log_level.upper())

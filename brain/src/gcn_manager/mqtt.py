@@ -25,7 +25,7 @@ from gcn_manager.constants import *
 
 class MqttApp:
 
-    def __init__(self, args, loop, receive_queue: asyncio.Queue) -> None:
+    def __init__(self, args, loop: asyncio.AbstractEventLoop, receive_queue: asyncio.Queue) -> None:
         self._receive_queue = receive_queue
         self._dropped_messages_because_receive_queue_was_full = 0
         self._loop = loop
@@ -124,7 +124,7 @@ class MqttApp:
         return self._dropped_messages_because_receive_queue_was_full
 
     def _set_status(self, *, online: bool) -> MQTTMessageInfo:
-        topic = f"{MQTT_APP_MANAGER_STATUS}/{self._mqtt_client_id}"
+        topic = f"{MQTT_APP_MANAGER_STATUS_TOPIC}/{self._mqtt_client_id}"
         message = MQTT_APP_MANAGER_STATUS_ONLINE if online else MQTT_APP_MANAGER_STATUS_OFFLINE
         return self.publish(topic=topic, payload=message, qos=1, retain=True)
 
@@ -195,8 +195,9 @@ class MqttApp:
                       f"properties {msg.properties}, "
                       f"topic {msg.topic}, "
                       f"payload {msg.payload}")
-        # noinspection PyUnresolvedReferences
-        message = AppMqttMessage(msg.topic, msg.payload.decode())
+
+        # noinspection PyTypeChecker
+        message = AppMqttMessage(msg.topic, msg.payload)
         try:
             self._receive_queue.put_nowait(message)
         except asyncio.QueueFull:
