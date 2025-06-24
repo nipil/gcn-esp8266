@@ -33,11 +33,11 @@ async def processing(msg: MQTTMessage):
 
 class MqttApp:
 
-    def __init__(self, args, loop: asyncio.AbstractEventLoop, receive_queue: asyncio.Queue) -> None:
+    def __init__(self, args, receive_queue: asyncio.Queue) -> None:
         self._handling_tasks = set()
         self._receive_queue = receive_queue
         self._dropped_messages_because_receive_queue_was_full = 0
-        self._event_loop = loop
+        # self._event_loop = loop
         self._idle_loop_sleep = args.idle_loop_sleep
         self._misc_loop_task: asyncio.Task | None = None
         self._finished: asyncio.Future | None = None  # to provide wait and status at the end
@@ -91,7 +91,7 @@ class MqttApp:
             # TLS errors are red flag for bad configuration or misbehaving actors : do not retry
             raise AppError(f"TLS error while communicating with {self._mqtt_port} of '{self._mqtt_host}' : {e}")
 
-        self._finished = self._event_loop.create_future()
+        self._finished = asyncio.get_running_loop().create_future()
 
     @property
     def finished(self):
@@ -208,7 +208,7 @@ class MqttApp:
                       f"payload {msg.payload}")
 
         # store a strong reference to the created task to prevent garbage collection in asyncio
-        processing_task = self._event_loop.create_task(processing(msg))
+        processing_task = asyncio.get_running_loop().create_task(processing(msg))
         self._handling_tasks.add(processing_task)
 
         # noinspection PyTypeChecker
@@ -233,7 +233,7 @@ class MqttApp:
 
     def _on_socket_close(self, _client: Client, _user_data: Any, sock) -> None:
         logging.debug(f"Socket {sock} is about to close, remove socket from loop readers")
-        self._event_loop.remove_reader(sock)
+        asyncio.get_running_loop().remove_reader(sock)
         self._misc_loop_task.cancel()  # never none, as socket close cannot happen before open succeeded
 
     def _loop_read(self):
@@ -245,8 +245,9 @@ class MqttApp:
         # noinspection PyUnresolvedReferences
         self._paho_mqtt_client.socket().setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF,
                                                    self._mqtt_socket_send_buffer_size)
-        self._event_loop.add_reader(sock, self._loop_read)
-        self._misc_loop_task = self._event_loop.create_task(self._loop_misc())
+        loop = asyncio.get_running_loop()
+        loop.add_reader(sock, self._loop_read)
+        self._misc_loop_task = loop.create_task(self._loop_misc())
 
     def _loop_write(self):
         logging.debug("Socket is writable, calling loop_write")
@@ -254,11 +255,11 @@ class MqttApp:
 
     def _on_socket_register_write(self, _client: Client, _user_data: Any, sock) -> None:
         logging.debug(f"Client data needs writing to {sock}, add sock to loop writers")
-        self._event_loop.add_writer(sock, self._loop_write)
+        asyncio.get_running_loop().add_writer(sock, self._loop_write)
 
     def _on_socket_unregister_write(self, _client: Client, _user_data: Any, sock) -> None:
         logging.debug(f"No more client data to write into socket {sock}, remove sock from loop writers")
-        self._event_loop.remove_writer(sock)
+        asyncio.get_running_loop().remove_writer(sock)
 
     @staticmethod
     def _on_subscribe(_client: Client, _user_data: Any, mid: int, reason_code_list: list[ReasonCodes],

@@ -38,7 +38,7 @@ async def _run_async(args) -> None:
     event_loop = asyncio.get_running_loop()
     received_messages = asyncio.Queue(args.mqtt_in_queue_max_size)
     notify_queue = asyncio.Queue(args.notification_out_queue_max_size)
-    mqtt_app = MqttApp(args, event_loop, received_messages)
+    mqtt_app = MqttApp(args, received_messages)
     brain_app = BrainApp(args, received_messages, mqtt_app, notify_queue)
     notify_app = NotifyApp(args, notify_queue)
     mqtt_task = event_loop.create_task(mqtt_app.run())
