@@ -10,10 +10,28 @@ import paho
 from paho.mqtt.client import Client, ConnectFlags, DisconnectFlags, ReasonCodes, Properties, MQTTMessage, \
     MQTTMessageInfo, MQTT_LOG_INFO, MQTT_LOG_NOTICE, MQTT_LOG_WARNING, MQTT_LOG_ERR, MQTT_LOG_DEBUG, MQTT_ERR_NO_CONN, \
     MQTT_ERR_SUCCESS, PayloadType
-from paho.mqtt.enums import MQTTErrorCode
 
 from gcn_manager import AppError, get_env, MqttPublisher, MessageProcessor, MessageError
 from gcn_manager.constants import *
+
+
+class MqttMessageIdTracker:
+    def __init__(self):
+        self._topics: dict[int, str] = dict()
+
+    def track(self, mid: int, topic: str) -> None:
+        logging.debug(f"Tracking {mid=} {topic=}")
+        if mid in self._topics:
+            raise AppError(f"Wants to track mid {mid} but already tracked")
+        self._topics[mid] = topic
+
+    def untrack(self, mid: int) -> str:
+        try:
+            topic = self._topics.pop(mid)
+        except KeyError:
+            raise AppError(f"Wants to untrack mid {mid} but not tracked")
+        logging.debug(f"Untracking {mid=} {topic=}")
+        return topic
 
 
 class MqttAgent(MqttPublisher):
@@ -26,6 +44,7 @@ class MqttAgent(MqttPublisher):
         self._remaining_tasks: set[asyncio.Task] = set()
         self._subscribed_topics: set[str] = set()
         # agent lifecycle
+        self._mid = MqttMessageIdTracker()
         self._idle_loop_sleep = args.idle_loop_sleep
         self._no_writer_left: asyncio.Event | None = None
         self._misc_loop_task: asyncio.Task | None = None
@@ -74,9 +93,8 @@ class MqttAgent(MqttPublisher):
     def _get_manager_status_topic(self) -> str:
         return f"{MQTT_APP_MANAGER_STATUS_TOPIC}/{self.client_id}"
 
-    # FIXME: fail when self._shutdown_requested and still retrying
-    @backoff.on_exception(partial(backoff.expo, base=3, max_value=10),
-                          (socket.gaierror, TimeoutError, ConnectionRefusedError))
+    @backoff.on_exception(partial(backoff.expo, base=1.5, max_value=3), jitter=backoff.random_jitter,
+                          exception=(socket.gaierror, TimeoutError, ConnectionRefusedError))
     async def _connect(self) -> asyncio.Future:
         """
         Transient exceptions are retried with back off
@@ -92,6 +110,8 @@ class MqttAgent(MqttPublisher):
         # By calling asyncio.run_coroutine_threadsafe() to get a Future which we would track as strong reference
         #
         # Anyway, make connect() async, so at least backoff can process other tasks while retrying on exceptions.
+        if self._shutdown_requested.is_set():
+            raise AppError("Still trying to connect while shutting down")
         logging.info(f"Connecting to MQTT broker '{self._mqtt_host}:{self._mqtt_port}'...")
         self._connect_result = asyncio.get_running_loop().create_future()
         self._disconnect_result = asyncio.get_running_loop().create_future()
@@ -104,35 +124,42 @@ class MqttAgent(MqttPublisher):
             self._disconnect_result.set_exception(exc)
         return self._connect_result
 
-    def publish(self, topic: str, payload: bytes | bytearray = None, qos: int = 0, retain: bool = False) -> None:
-        # Make it a different signature to decouple from Paho client
-        self._publish(topic, payload, qos, retain)
-
-    def _publish(self, topic: str, payload: PayloadType = None, qos: int = 0, retain: bool = False,
-                 properties: Properties | None = None) -> MQTTMessageInfo:
-        return self._paho_mqtt_client.publish(topic, payload, qos, retain, properties)
+    def publish(self, topic: str, payload: PayloadType = None, qos: int = 0, retain: bool = False,
+                properties: Properties | None = None) -> MQTTMessageInfo:
+        info = self._paho_mqtt_client.publish(topic, payload, qos, retain, properties)
+        logging.debug(f"Published message {info}")
+        self._mid.track(info.mid, topic)  # for _on_publish()
+        return info
 
     def subscribe(self, topic: str, qos: int) -> None:
         error, mid = self._paho_mqtt_client.subscribe(topic, qos)
         if error == MQTT_ERR_NO_CONN:
             raise AppError(f"Could not subscribe to topic {topic}: not connected")
         elif error == MQTT_ERR_SUCCESS:
+            logging.debug(f"Subscribing to topic {topic} {qos=}")
+            self._mid.track(mid, topic)  # for _on_subscribe()
             self._subscribed_topics.add(topic)
-            return
         else:
             raise AppError(f"Unknown MQTTErrorCode during subscribe to {topic}: {error}")
 
-    def unsubscribe(self, topic: str) -> None:
-        if topic in self._subscribed_topics:
-            self._unsubscribe(topic)
-        else:
+    def unsubscribe(self, topic: str | list[str], properties: Properties | None = None) -> None:
+        if topic not in self._subscribed_topics:
             raise AppError(f"Topic {topic} was not subscribed and cannot be unsubscribed")
+        error, mid = self._paho_mqtt_client.unsubscribe(topic, properties)
+        if error == MQTT_ERR_NO_CONN:
+            raise AppError(f"Could not unsubscribe to topic {topic}: not connected")
+        elif error == MQTT_ERR_SUCCESS:
+            logging.debug(f"Unsubscribing from topic {topic}")
+            self._mid.track(mid, topic)  # for _on_unsubscribe()
+            self._subscribed_topics.remove(topic)
+        else:
+            raise AppError(f"Unknown MQTTErrorCode during subscribe to {topic}: {error}")
 
-    def _unsubscribe(self, topic: str | list[str], properties: Properties | None = None) -> tuple[
-        MQTTErrorCode, int | None]:
-        # TODO: check errors MQTT_ERR_SUCCESS / MQTT_ERR_NO_CONN
-        logging.debug(f"Unsubscribing from topic {topic}")
-        return self._paho_mqtt_client.unsubscribe(topic, properties)
+    def unsubscribe_all(self) -> None:
+        topics = self._subscribed_topics.copy()  # build a shallow copy to iterate over
+        logging.info(f"Unsubscribing to all ({len(topics)}) subscribed topics")
+        for topic in topics:
+            self.unsubscribe(topic)  # as this modifies self._subscribed_topics in-place
 
     def _disconnect(self) -> None:
         logging.debug("Disconnecting from broker")
@@ -142,7 +169,7 @@ class MqttAgent(MqttPublisher):
         topic = self._get_manager_status_topic()
         message = MQTT_APP_MANAGER_STATUS_ONLINE if online else MQTT_APP_MANAGER_STATUS_OFFLINE
         logging.debug(f"Setting {self.client_id} status to {message}")
-        return self._publish(topic=topic, payload=message, qos=1, retain=True)
+        return self.publish(topic=topic, payload=message, qos=1, retain=True)
 
     @property
     def connection_result(self) -> asyncio.Future:
@@ -210,6 +237,9 @@ class MqttAgent(MqttPublisher):
                       f"properties {msg.properties}, "
                       f"topic {msg.topic}, "
                       f"payload {msg.payload}")
+
+        # TODO: check tracked mid --> WHAT for  ?
+
         # noinspection PyTypeChecker
         future = self._processor.process(msg.topic, msg.payload, publisher=self)
         # create a task per message
@@ -221,39 +251,50 @@ class MqttAgent(MqttPublisher):
     def _on_pre_connect(_client: Client, _user_data: Any) -> None:
         logging.debug(f"Starting connection.")
 
-    @staticmethod
-    def _on_publish(_client: Client, _user_data: Any, mid: int, reason_code: ReasonCodes,
+    def _on_publish(self, _client: Client, _user_data: Any, mid: int, reason_code: ReasonCodes,
                     properties: Properties) -> None:
-        logging.debug(f"Sent message: "
-                      f"mid {mid}, "
-                      f"reason code {reason_code.getName()}, "
-                      f"properties {properties}")
+        logging.debug(f"Broker responded to publish {mid=} {reason_code=} {str(properties)=}")
+        topic = self._mid.untrack(mid)  # from publish()
+        if reason_code.is_failure:
+            raise AppError(f"Encountered {reason_code.value}/{reason_code} while publishing to {topic}")
 
     def _on_socket_close(self, _client: Client, _user_data: Any, sock) -> None:
+        """
+        cancel task for asynchronous reading of packets, no more incoming messages can arrive
+        cancel task for queuing keepalive packets
+        """
         logging.debug(f"Socket {sock} is about to close, remove socket from loop readers")
         asyncio.get_running_loop().remove_reader(sock)
         if self._misc_loop_task is not None:
             self._misc_loop_task.cancel()
 
     def _loop_read(self) -> None:
+        """task for asynchronous reading of incoming socket data, then calling the appropriate callbacks"""
         logging.debug("Socket is readable, calling loop_read")
         self._paho_mqtt_client.loop_read()
 
     def _on_socket_open(self, _client: Client, _user_data: Any, sock) -> None:
+        """
+        set socket write buffer size
+        add task for asynchronous reading of packets for incoming messages
+        add task for queuing keepalive packets as needed
+        """
         logging.debug(f"Socket {sock} opened, add socket to loop readers, set sock opt, create misc loop async task")
         # noinspection PyUnresolvedReferences
         _set_sock_opt = self._paho_mqtt_client.socket().setsockopt
         _set_sock_opt(socket.SOL_SOCKET, socket.SO_SNDBUF, self._mqtt_socket_send_buffer_size)
-        # add task for asynchronous reading of packets + add task for sending keepalive as needed
+        # noinspection PyTypeChecker
         asyncio.get_running_loop().add_reader(sock, self._loop_read)
         self._misc_loop_task = asyncio.get_running_loop().create_task(self._loop_misc())
 
     def _loop_write(self) -> None:
+        """task for asynchronous writing of buffered packets to socket, as long as there are any to send"""
         logging.debug("Socket is writable, calling loop_write")
         self._paho_mqtt_client.loop_write()
 
     def _on_socket_register_write(self, _client: Client, _user_data: Any, sock) -> None:
         logging.debug(f"Client data needs writing to {sock}, add sock to loop writers")
+        # noinspection PyTypeChecker
         asyncio.get_running_loop().add_writer(sock, self._loop_write)
         self._no_writer_left = asyncio.Event()
 
@@ -262,28 +303,24 @@ class MqttAgent(MqttPublisher):
         asyncio.get_running_loop().remove_writer(sock)
         self._no_writer_left.set()
 
-    @staticmethod
-    def _on_subscribe(_client: Client, _user_data: Any, mid: int, reason_code_list: list[ReasonCodes],
+    def _on_subscribe(self, _client: Client, _user_data: Any, mid: int, reason_code_list: list[ReasonCodes],
                       properties: Properties) -> None:
-        logging.debug(f"Broker responded to subscribe "
-                      f"mid {mid}, "
-                      f"reason_codes {reason_code_list}, "
-                      f"properties {properties}")
+        logging.debug(f"Broker responded to subscribe {mid=} {reason_code_list=} {str(properties)=}")
+        topic = self._mid.untrack(mid)  # from subscribe()
+        for reason_code in reason_code_list:
+            if reason_code.is_failure:
+                raise AppError(f"Encountered {reason_code.value}/{reason_code} while subscribing to {topic}")
 
-        # TODO: handle subscription errors
-
-    @staticmethod
-    def _on_unsubscribe(_client: Client, _user_data: Any, mid: int, reason_code_list: list[ReasonCodes],
+    def _on_unsubscribe(self, _client: Client, _user_data: Any, mid: int, reason_code_list: list[ReasonCodes],
                         properties: Properties) -> None:
-        logging.debug(f"Broker responded to unsubscribe "
-                      f"mid {mid}, "
-                      f"reason_codes {reason_code_list}, "
-                      f"properties {properties}")
-
-        # TODO: handle unsubscription errors
+        logging.debug(f"Broker responded to unsubscribe {mid=} {reason_code_list=} {str(properties)=}")
+        topic = self._mid.untrack(mid)  # from unsubscribe()
+        for reason_code in reason_code_list:
+            if reason_code.is_failure:
+                raise AppError(f"Encountered {reason_code.value}/{reason_code} while unsubscribing to {topic}")
 
     async def _loop_misc(self) -> None:
-        # mqtt keepalive task
+        """asynchronous task for queuing keepalive packets as needed regarding message activity"""
         logging.debug("MQTT misc_loop started")
         while self._paho_mqtt_client.loop_misc() == MQTT_ERR_SUCCESS:
             try:
@@ -343,10 +380,9 @@ class MqttAgent(MqttPublisher):
         # cleanup subscription and status if still connected
         if self._paho_mqtt_client.is_connected():
             logging.info(f"MQTT task detected shutdown request")
-            # unsubscribing to all tracked topics and updating our online status, to quench the flow
-            logging.info(f"Unsubscribing to all subscribed topics")
-            for topic in self._subscribed_topics:
-                self._unsubscribe(topic)
+            # unsubscribing to all tracked topics to quench the flow
+            self.unsubscribe_all()
+            # update our online status
             self._set_status(online=False)
             # waiting for writer tasks to finish
             await self._no_writer_left.wait()
