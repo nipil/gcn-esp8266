@@ -7,7 +7,7 @@ class AppError(Exception):
     pass
 
 
-class AppErrorCanRetry(Exception):
+class MessageError(Exception):
     pass
 
 
@@ -19,8 +19,8 @@ class AppMqttMessage:
 
 
 class ClientStatus(enum.StrEnum):
-    ONLINE = 'online'
-    OFFLINE = 'offline'
+    ONLINE = "online"
+    OFFLINE = "offline"
 
 
 @dataclass
@@ -42,6 +42,13 @@ def get_env(key: str) -> str:
 
 
 class MqttPublisher:
+
+    def __init__(self, client_id: str) -> None:
+        self._client_id = client_id
+
+    @property
+    def client_id(self):
+        return self._client_id
 
     def subscribe(self, topic: str, qos: int) -> None:
         raise NotImplementedError()

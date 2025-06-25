@@ -9,20 +9,21 @@ import backoff
 import paho
 from paho.mqtt.client import Client, ConnectFlags, DisconnectFlags, ReasonCodes, Properties, MQTTMessage, \
     MQTTMessageInfo, MQTT_LOG_INFO, MQTT_LOG_NOTICE, MQTT_LOG_WARNING, MQTT_LOG_ERR, MQTT_LOG_DEBUG, MQTT_ERR_NO_CONN, \
-    MQTT_ERR_SUCCESS, PayloadType, topic_matches_sub
+    MQTT_ERR_SUCCESS, PayloadType
 from paho.mqtt.enums import MQTTErrorCode
 
-from gcn_manager import AppError, get_env, MqttPublisher, MessageProcessor
+from gcn_manager import AppError, get_env, MqttPublisher, MessageProcessor, MessageError
 from gcn_manager.constants import *
 
 
 class MqttAgent(MqttPublisher):
 
     def __init__(self, args, client_id: str, *, processor: MessageProcessor, shutdown_requested: asyncio.Event) -> None:
+        super().__init__(client_id)
         # message processing
         self._processor = processor
         self._shutdown_requested = shutdown_requested
-        self._handling_tasks: set[asyncio.Task] = set()
+        self._remaining_tasks: set[asyncio.Task] = set()
         self._subscribed_topics: set[str] = set()
         # agent lifecycle
         self._idle_loop_sleep = args.idle_loop_sleep
@@ -31,14 +32,13 @@ class MqttAgent(MqttPublisher):
         self._connect_result: asyncio.Future | None = None
         self._disconnect_result: asyncio.Future | None = None
         # PAHO client configuration
-        self._client_id = client_id
         self._mqtt_socket_send_buffer_size = args.mqtt_socket_send_buffer_size
         self._mqtt_host = args.mqtt_host
         self._mqtt_port = args.mqtt_port
         self._mqtt_keep_alive = args.mqtt_keep_alive
         self._mqtt_retry = args.mqtt_reconnect
         self._paho_mqtt_client = Client(callback_api_version=paho.mqtt.client.CallbackAPIVersion.VERSION2,
-                                        clean_session=True, client_id=self._client_id,
+                                        clean_session=True, client_id=self.client_id,
                                         protocol=paho.mqtt.client.MQTTv311, transport=args.mqtt_transport,
                                         reconnect_on_failure=self._mqtt_retry)
         context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
@@ -72,7 +72,7 @@ class MqttAgent(MqttPublisher):
                                         qos=1, retain=True)
 
     def _get_manager_status_topic(self) -> str:
-        return f"{MQTT_APP_MANAGER_STATUS_TOPIC}/{self._client_id}"
+        return f"{MQTT_APP_MANAGER_STATUS_TOPIC}/{self.client_id}"
 
     # FIXME: fail when self._shutdown_requested and still retrying
     @backoff.on_exception(partial(backoff.expo, base=3, max_value=10),
@@ -112,13 +112,6 @@ class MqttAgent(MqttPublisher):
                  properties: Properties | None = None) -> MQTTMessageInfo:
         return self._paho_mqtt_client.publish(topic, payload, qos, retain, properties)
 
-    @staticmethod
-    def topic_matches_subscription(topic: str, subscription: str) -> bool:
-        # TODO: remove so we have no functional adherence to this mqtt client
-        # and we do not actually parse topics multiple times
-        """Wrapper so that we do not have to change API if we need to reimplement when changing low-level MQTT client"""
-        return topic_matches_sub(subscription, topic)
-
     def subscribe(self, topic: str, qos: int) -> None:
         error, mid = self._paho_mqtt_client.subscribe(topic, qos)
         if error == MQTT_ERR_NO_CONN:
@@ -148,7 +141,7 @@ class MqttAgent(MqttPublisher):
     def _set_status(self, *, online: bool) -> MQTTMessageInfo:
         topic = self._get_manager_status_topic()
         message = MQTT_APP_MANAGER_STATUS_ONLINE if online else MQTT_APP_MANAGER_STATUS_OFFLINE
-        logging.debug(f"Setting {self._client_id} status to {message}")
+        logging.debug(f"Setting {self.client_id} status to {message}")
         return self._publish(topic=topic, payload=message, qos=1, retain=True)
 
     @property
@@ -222,7 +215,7 @@ class MqttAgent(MqttPublisher):
         # create a task per message
         task = asyncio.get_running_loop().create_task(future)
         # store a strong reference to the created task, to prevent garbage collection in asyncio
-        self._handling_tasks.add(task)
+        self._remaining_tasks.add(task)
 
     @staticmethod
     def _on_pre_connect(_client: Client, _user_data: Any) -> None:
@@ -300,13 +293,22 @@ class MqttAgent(MqttPublisher):
                 break
         logging.debug("MQTT misc_loop finished")
 
-    def _cleanup_finished_handling_tasks(self):
-        before_size = len(self._handling_tasks)
-        self._handling_tasks = set(task for task in self._handling_tasks if not task.done())
-        # TODO: handle failed tasks
-        after_size = len(self._handling_tasks)
-        if before_size != after_size:
-            logging.debug(f"Handling tasks count: {before_size} -> {after_size}")
+    async def _cleanup_finished_handling_tasks(self, *, timeout: float | None):
+        if len(self._remaining_tasks) == 0:  # asyncio.wait() raises ValueError on empty set
+            return
+        finished_tasks, self._remaining_tasks = await asyncio.wait(self._remaining_tasks, timeout=timeout,
+                                                                   return_when=asyncio.FIRST_COMPLETED)
+        if len(finished_tasks) > 0:
+            logging.debug(f"Found {len(self._remaining_tasks)} remaining tasks and {len(finished_tasks)} finished")
+        while finished_tasks:
+            task = finished_tasks.pop()
+            try:
+                result = task.result()
+                logging.debug(f"Task result : {result}")
+            except MessageError as e:
+                logging.warning(f"Message processing error, ignoring message : {e}")
+
+                # TODO: find a way to attach message info to task, so we can provide it back
 
     async def _loop(self):
         # try to connect
@@ -328,16 +330,17 @@ class MqttAgent(MqttPublisher):
 
         # periodically cleanup finished tasks until shutdown or spurious disconnection
         while not self._shutdown_requested.is_set():
-            self._cleanup_finished_handling_tasks()
             if not self._paho_mqtt_client.is_connected():
                 logging.warning("Detected unexpected disconnection.")
                 break
             try:
+                await self._cleanup_finished_handling_tasks(timeout=self._idle_loop_sleep)
                 await asyncio.sleep(self._idle_loop_sleep)
             except asyncio.CancelledError:
                 logging.error("MQTT Agent app task was cancelled before shutdown was requested")
                 return
 
+        # cleanup subscription and status if still connected
         if self._paho_mqtt_client.is_connected():
             logging.info(f"MQTT task detected shutdown request")
             # unsubscribing to all tracked topics and updating our online status, to quench the flow
@@ -350,14 +353,10 @@ class MqttAgent(MqttPublisher):
             logging.info(f"No more writers, disconnecting from server")
 
         # connected or not, wait for all tasks to finish
-        while self._handling_tasks:
-            logging.info(f"Waiting for {len(self._handling_tasks)} handling tasks to finish...")
+        while self._remaining_tasks:
+            logging.info(f"Waiting for {len(self._remaining_tasks)} handling tasks to finish...")
             try:
-                finished, self._handling_tasks = await asyncio.wait(self._handling_tasks,
-                                                                    return_when=asyncio.FIRST_COMPLETED,
-                                                                    timeout=None)  # minimum display
-
-                # TODO: handle failed tasks
+                await self._cleanup_finished_handling_tasks(timeout=None)  # minimum display during cleanup
             except asyncio.CancelledError:
                 logging.error("MQTT Agent app task was cancelled before handling tasks could finish")
                 return

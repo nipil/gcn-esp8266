@@ -28,7 +28,7 @@ async def _run(args) -> None:
     random.seed()
     shutdown_requested = asyncio.Event()
     brain = Brain(args)
-    mqtt_client_id = f"{MQTT_APP}_manager_{random.randbytes(args.mqtt_client_id_random_bytes).hex().lower()}"
+    mqtt_client_id = f"{MQTT_APP_MANAGER}_{random.randbytes(args.mqtt_client_id_random_bytes).hex().lower()}"
     mqtt_agent = MqttAgent(args, mqtt_client_id, processor=brain, shutdown_requested=shutdown_requested)
     loop = asyncio.get_running_loop()
     mqtt_task = loop.create_task(mqtt_agent.run())
@@ -44,7 +44,7 @@ async def _run(args) -> None:
 
 
 def _tls_available_versions():
-    return (v for v in vars(ssl.TLSVersion) if not v.startswith('_'))
+    return (v for v in vars(ssl.TLSVersion) if not v.startswith("_"))
 
 
 def _to_tls_version(tls_version: str):
@@ -117,7 +117,7 @@ def main() -> None:
         sys.exit(2)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     if CLI_OPT_TRACE in sys.argv[1:]:
         main_trace()
     else:

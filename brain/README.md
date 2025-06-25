@@ -1,8 +1,5 @@
 # Brain (in Python)
 
-PAHO doc : https://eclipse.dev/paho/files/paho.mqtt.python/html/index.html
-
-
 # python asyncio debug
 
     export PYTHONASYNCIODEBUG=1
