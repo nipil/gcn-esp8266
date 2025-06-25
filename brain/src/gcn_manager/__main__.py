@@ -23,30 +23,6 @@ def graceful_shutdown(sig: signal.Signals, shutdown_requested: asyncio.Event) ->
     logging.info(f"Received signal {sig}, requesting graceful shutdown")
     shutdown_requested.set()
 
-    #  # for task in asyncio.all_tasks():  #     if task is mqtt_app:  #         try:  #             mqtt_app.mqtt_agent.disconnect()  #         except AttributeError:  #             pass  #         continue  #     task.cancel()
-
-
-#
-# async def _run_async(args) -> None:
-#     # initialize
-#     random.seed()
-#
-#     # dependencies
-#     event_loop = asyncio.get_running_loop()
-#     received_messages = asyncio.Queue(args.mqtt_in_queue_max_size)
-#     # notify_queue = asyncio.Queue(args.notification_out_queue_max_size)
-#     mqtt_client_id = f"{MQTT_APP}_manager_{random.randbytes(args.mqtt_client_id_random_bytes).hex().lower()}"
-#     brain = Brain(args)
-#     mqtt_agent = MqttAgent(args, mqtt_client_id, processor=brain)
-#     mqtt_task = event_loop.create_task(mqtt_agent.run())
-#     mqtt_task.mqtt_agent = mqtt_agent
-#
-#
-#     try:
-#         await asyncio.gather(mqtt_task)
-#     except asyncio.CancelledError:
-#         logging.info("Application tasks have been cancelled")
-
 
 async def _run(args) -> None:
     random.seed()
@@ -56,7 +32,7 @@ async def _run(args) -> None:
     mqtt_agent = MqttAgent(args, mqtt_client_id, processor=brain, shutdown_requested=shutdown_requested)
     loop = asyncio.get_running_loop()
     mqtt_task = loop.create_task(mqtt_agent.run())
-    for sig in (signal.SIGINT, signal.SIGTERM):  # FIXME: what of signal.SIGHUP ?
+    for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, graceful_shutdown, sig, shutdown_requested)
     try:
         await asyncio.gather(mqtt_task)

@@ -36,10 +36,11 @@ class MqttAgent(MqttPublisher):
         self._mqtt_host = args.mqtt_host
         self._mqtt_port = args.mqtt_port
         self._mqtt_keep_alive = args.mqtt_keep_alive
+        self._mqtt_retry = args.mqtt_reconnect
         self._paho_mqtt_client = Client(callback_api_version=paho.mqtt.client.CallbackAPIVersion.VERSION2,
                                         clean_session=True, client_id=self._client_id,
                                         protocol=paho.mqtt.client.MQTTv311, transport=args.mqtt_transport,
-                                        reconnect_on_failure=args.mqtt_reconnect)
+                                        reconnect_on_failure=self._mqtt_retry)
         context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
         if args.mqtt_tls_min_version is not None:
             context.minimum_version = args.mqtt_tls_min_version
@@ -72,7 +73,6 @@ class MqttAgent(MqttPublisher):
 
     def _get_manager_status_topic(self) -> str:
         return f"{MQTT_APP_MANAGER_STATUS_TOPIC}/{self._client_id}"
-
 
     # FIXME: fail when self._shutdown_requested and still retrying
     @backoff.on_exception(partial(backoff.expo, base=3, max_value=10),
@@ -188,10 +188,6 @@ class MqttAgent(MqttPublisher):
         # resolve the Future only if it has not already been resolved, for example, in on_connect on error
         if not self._disconnect_result.done():
             self._disconnect_result.set_result(reason_code)
-        # handle spurious disconnections by shutting down and trying again
-        if reason_code.is_failure:
-            logging.warning(f"Detected error '{reason_code}' on disconnect, triggering shutting down...")
-            self._shutdown_requested.set()
 
     @staticmethod
     def _on_log(_client: Client, _user_data: Any, level: int, buf: str) -> None:
@@ -330,53 +326,58 @@ class MqttAgent(MqttPublisher):
         self.subscribe(MQTT_APP_MANAGER_STATUS_SUBSCRIPTION, 1)
         self.subscribe(MQTT_APP_CLIENT_SUBSCRIPTION, 1)
 
-        # periodically cleanup spawned message processing tasks until shutdown, once they are finished
+        # periodically cleanup finished tasks until shutdown or spurious disconnection
         while not self._shutdown_requested.is_set():
             self._cleanup_finished_handling_tasks()
+            if not self._paho_mqtt_client.is_connected():
+                logging.warning("Detected unexpected disconnection.")
+                break
             try:
                 await asyncio.sleep(self._idle_loop_sleep)
             except asyncio.CancelledError:
                 logging.error("MQTT Agent app task was cancelled before shutdown was requested")
                 return
-        logging.info(f"MQTT task detected shutdown request")
 
-        # FIXME: what happens to _result upon unexpected disconnect ?
+        if self._paho_mqtt_client.is_connected():
+            logging.info(f"MQTT task detected shutdown request")
+            # unsubscribing to all tracked topics and updating our online status, to quench the flow
+            logging.info(f"Unsubscribing to all subscribed topics")
+            for topic in self._subscribed_topics:
+                self._unsubscribe(topic)
+            self._set_status(online=False)
+            # waiting for writer tasks to finish
+            await self._no_writer_left.wait()
+            logging.info(f"No more writers, disconnecting from server")
 
-        # unsubscribing to all tracked topics and updating our online status, to quench the flow
-        logging.info(f"Unsubscribing to all subscribed topics")
-        for topic in self._subscribed_topics:
-            self._unsubscribe(topic)
-        self._set_status(online=False)
-        # waiting for writer tasks to finish
-        await self._no_writer_left.wait()
-        logging.info(f"No more writers, disconnecting from server")
-
-        # wait for all tasks to finish
+        # connected or not, wait for all tasks to finish
         while self._handling_tasks:
             logging.info(f"Waiting for {len(self._handling_tasks)} handling tasks to finish...")
             try:
                 finished, self._handling_tasks = await asyncio.wait(self._handling_tasks,
                                                                     return_when=asyncio.FIRST_COMPLETED,
-                                                                    timeout=self._idle_loop_sleep)
+                                                                    timeout=None)  # minimum display
 
                 # TODO: handle failed tasks
             except asyncio.CancelledError:
                 logging.error("MQTT Agent app task was cancelled before handling tasks could finish")
                 return
 
-        # disconnect finally
-        self._disconnect()
-        try:
-            reason_code = await self._disconnect_result
-            logging.info(f"Disconnected from MQTT broker {reason_code.value}/{reason_code}")
-        except asyncio.CancelledError:
-            logging.debug("MQTT Agent app task was cancelled while waiting for disconnection")
-            return
-        except AppError as e:
-            logging.error(f"Disconnection failed irrevocably : {e}")
-            return
+        if self._paho_mqtt_client.is_connected():
+            # disconnect cleanly
+            self._disconnect()
+            try:
+                reason_code = await self._disconnect_result
+                logging.info(f"Disconnected from MQTT broker {reason_code.value}/{reason_code}")
+            except asyncio.CancelledError:
+                logging.debug("MQTT Agent app task was cancelled while waiting for disconnection")
+                return
+            except AppError as e:
+                logging.error(f"Disconnection failed irrevocably : {e}")
+                return
         logging.info("MQTT app task finished")
 
     async def run(self) -> None:
-        while not self._shutdown_requested.is_set():
+        await self._loop()
+        while self._mqtt_retry and not self._shutdown_requested.is_set():
             await self._loop()
+        logging.info("Exiting mqtt lifecycle loop")
